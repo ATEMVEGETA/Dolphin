@@ -8,6 +8,7 @@
 #include <optional>
 #include <utility>
 
+#include <QCheckBox>
 #include <QDir>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -25,6 +26,7 @@
 #include "Core/Config/SYSCONFSettings.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
+#include "Core/IOS/Network/WD/WiiDSBridgeSettings.h"
 #include "Core/System.h"
 #include "Core/USBUtils.h"
 
@@ -90,6 +92,13 @@ void WiiPane::CreateLayout()
 
 void WiiPane::ConnectLayout()
 {
+  const auto save_wii_ds = [this] {
+    IOS::HLE::WD::SaveWiiDSBridgeSettings(
+        {m_wii_ds_bridge_checkbox->isChecked(), m_wii_ds_diagnostics_checkbox->isChecked()});
+  };
+  connect(m_wii_ds_bridge_checkbox, &QCheckBox::toggled, this, save_wii_ds);
+  connect(m_wii_ds_diagnostics_checkbox, &QCheckBox::toggled, this, save_wii_ds);
+
   // Whitelisted USB Passthrough Devices
   connect(&Settings::Instance(), &Settings::ConfigChanged, this,
           &WiiPane::PopulateUSBPassthroughListWidget);
@@ -117,6 +126,19 @@ void WiiPane::CreateMisc()
       new ConfigBool(tr("Enable WiiConnect24 via WiiLink"), Config::MAIN_WII_WIILINK_ENABLE);
   m_connect_keyboard_checkbox =
       new ConfigBool(tr("Connect USB Keyboard"), Config::MAIN_WII_KEYBOARD);
+  m_wii_ds_bridge_checkbox = new QCheckBox(tr("Connect to melonDS"));
+  m_wii_ds_diagnostics_checkbox = new QCheckBox(tr("Wii-DS diagnostic logging"));
+  m_wii_ds_bridge_checkbox->setToolTip(
+      tr("Enables a local Wii-DS link with one compatible melonDS instance on this PC.\n"
+         "Enable Connect to Dolphin in melonDS as well. No Wi-Fi adapter is needed.\n"
+         "Applies to the next game launch. The emulators can be opened in either order;\n"
+         "start the connection from each game's own menu."));
+  m_wii_ds_diagnostics_checkbox->setToolTip(
+      tr("Writes bounded connection records to User/Logs/wii-ds-bridge.log (up to 8 MiB).\n"
+         "No game payloads are logged. Applies to the next game launch."));
+  const auto wii_ds = IOS::HLE::WD::LoadWiiDSBridgeSettings();
+  m_wii_ds_bridge_checkbox->setChecked(wii_ds.enabled);
+  m_wii_ds_diagnostics_checkbox->setChecked(wii_ds.diagnostics);
 
   m_aspect_ratio_choice_label = new QLabel(tr("Aspect Ratio:"));
   m_aspect_ratio_choice = new ConfigChoiceMap<bool>({{tr("4:3"), false}, {tr("16:9"), true}},
@@ -160,6 +182,8 @@ void WiiPane::CreateMisc()
   misc_settings_group_layout->addWidget(m_system_language_choice, 3, 1, 1, 1);
   misc_settings_group_layout->addWidget(m_sound_mode_choice_label, 4, 0, 1, 1);
   misc_settings_group_layout->addWidget(m_sound_mode_choice, 4, 1, 1, 1);
+  misc_settings_group_layout->addWidget(m_wii_ds_bridge_checkbox, 5, 0, 1, 2);
+  misc_settings_group_layout->addWidget(m_wii_ds_diagnostics_checkbox, 6, 0, 1, 2);
 }
 
 void WiiPane::CreateSDCard()
@@ -344,6 +368,8 @@ void WiiPane::OnEmulationStateChanged(bool running)
   m_wiimote_ir_sensitivity->setEnabled(!running);
   m_wiimote_ir_sensor_position->setEnabled(!running);
   m_wiilink_checkbox->setEnabled(!running);
+  m_wii_ds_bridge_checkbox->setEnabled(!running);
+  m_wii_ds_diagnostics_checkbox->setEnabled(!running);
 }
 
 void WiiPane::ValidateSelectionState()

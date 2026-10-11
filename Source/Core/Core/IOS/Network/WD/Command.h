@@ -3,8 +3,12 @@
 
 #pragma once
 
+#include <array>
+#include <chrono>
 #include <deque>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "Common/CommonTypes.h"
 #include "Common/EnumFormatter.h"
@@ -12,6 +16,9 @@
 #include "Common/Network.h"
 #include "Common/Swap.h"
 #include "Core/IOS/Device.h"
+#include "Core/IOS/Network/WD/WiiDSBridgeDisconnect.h"
+
+#include <SFML/Network/UdpSocket.hpp>
 
 namespace IOS::HLE::WD
 {
@@ -51,6 +58,7 @@ public:
   };
 
   NetWDCommandDevice(EmulationKernel& ios, const std::string& device_name);
+  ~NetWDCommandDevice() override;
 
   std::optional<IPCReply> Open(const OpenRequest& request) override;
   std::optional<IPCReply> Close(u32 fd) override;
@@ -158,6 +166,13 @@ private:
   IPCReply GetLinkState(const IOCtlVRequest& request) const;
   IPCReply Disassociate(const IOCtlVRequest& request);
   IPCReply GetInfo(const IOCtlVRequest& request) const;
+  void SendBridgeBeacon(const IOCtlVRequest& request);
+  void SendBridgeFrame(const IOCtlVRequest& request);
+  void ClearBridgePeer();
+  void StopBridgeSession();
+  void WriteBridgeDiagnostic(std::string_view message) const;
+  void SendBridgeManagementResponse(const u8* request_frame, std::size_t frame_size,
+                                    u8 response_subtype, u8 channel);
 
   s32 m_ipc_owner_fd = -1;
   WD::Mode m_mode = WD::Mode::NotInitialized;
@@ -171,7 +186,31 @@ private:
 
   Common::Flag m_clear_all_requests;
   std::deque<u32> m_recv_frame_requests;
+  std::deque<std::vector<u8>> m_wii_ds_bridge_received_frames;
   std::deque<u32> m_recv_notification_requests;
+  std::deque<std::array<u8, 0x94>> m_wii_ds_bridge_notifications;
+  sf::UdpSocket m_wii_ds_bridge_socket;
+  bool m_wii_ds_bridge_enabled = false;
+  bool m_wii_ds_bridge_diagnostics = false;
+  u64 m_wii_ds_diagnostic_hellos = 0;
+  u64 m_wii_ds_diagnostic_rx_frames = 0;
+  u64 m_wii_ds_diagnostic_tx_frames = 0;
+  u64 m_wii_ds_diagnostic_recv_frames = 0;
+  u64 m_wii_ds_diagnostic_notifications = 0;
+  u64 m_wii_ds_diagnostic_beacons = 0;
+  std::vector<u8> m_wii_ds_bridge_beacon;
+  std::string m_wii_ds_bridge_peer_identity;
+  std::chrono::steady_clock::time_point m_wii_ds_bridge_last_hello{};
+  std::chrono::steady_clock::time_point m_wii_ds_bridge_last_bind{};
+  std::chrono::steady_clock::time_point m_wii_ds_bridge_last_ack{};
+  bool m_wii_ds_bridge_announced = false;
+  bool m_wii_ds_bridge_connected = false;
+  bool m_wii_ds_native_disconnect_enabled = false;
+  bool m_wii_ds_mp_config_enabled = false;
+  u32 m_wii_ds_mp_config_samples = 0;
+  std::array<u8, 16> m_wii_ds_mp_config_last{};
+  WD::WiiDSBridgeClient m_wii_ds_bridge_client;
+  u32 m_wii_ds_beacon_sent_events = 0;
 };
 }  // namespace IOS::HLE
 
