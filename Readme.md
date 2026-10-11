@@ -10,6 +10,15 @@
 > **Pokémon Battle Revolution**.
 > This work is not affiliated with or endorsed by the upstream Dolphin project.
 
+## Wii–DS Link download
+
+**[Download Dolphin 2609a Wii–DS Link for Windows x64](https://github.com/ATEMVEGETA/dolphin/releases/download/wii-ds-link-v0.1.0-beta.1/Dolphin-2609a-WiiDS-Link-Windows-x64-v0.1.0-beta.1.zip)**
+
+See the [v0.1.0-beta.1 release page](https://github.com/ATEMVEGETA/dolphin/releases/tag/wii-ds-link-v0.1.0-beta.1)
+for its SHA-256 checksum and source snapshot links. The
+[combined package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.1.0-beta.1)
+also includes the matching melonDS build.
+
 See
 [WiiDSBridge.md](Source/Core/Core/IOS/Network/WD/WiiDSBridge.md) for technical
 details and limitations. Games, Wii NAND data, firmware, and saves are not
