@@ -10,9 +10,6 @@
 > **Pokémon Battle Revolution**.
 > This work is not affiliated with or endorsed by the upstream Dolphin project.
 
-## Development Note
-This project was developed with the assistance of OpenAI Codex (AI), which helped with coding, debugging, and implementing new features. I provided the ideas, requirements, and direction for the project, along with testing and feedback throughout development.
-
 ## Wii–DS Link download
 
 **[Download Dolphin 2609a Wii–DS Link for Windows x64](https://github.com/ATEMVEGETA/dolphin/releases/download/wii-ds-link-v0.1.0-beta.1/Dolphin-2609a-WiiDS-Link-Windows-x64-v0.1.0-beta.1.zip)**
@@ -224,3 +221,6 @@ Options:
   -q, --quiet           Mute all messages except for errors.
   -g, --gameonly        Only extracts the DATA partition.
 ```
+
+## Development Note
+This project was developed with the assistance of OpenAI Codex (AI), which helped with coding, debugging, and implementing new features. I provided the ideas, requirements, and direction for the project, along with testing and feedback throughout development.
