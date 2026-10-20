@@ -7,21 +7,28 @@
 > Downloads, setup instructions, compatibility notes, and matching version
 > links are maintained at [Wii-DS-Link](https://github.com/ATEMVEGETA/Wii-DS-Link).
 > It has been tested so far with **My Pokémon Ranch** and
-> **Pokémon Battle Revolution**.
+> **Pokémon Battle Revolution**, including four DS players in DS Battle Mode.
 > This work is not affiliated with or endorsed by the upstream Dolphin project.
 
 ## Wii–DS Link download
 
-**[Download Dolphin 2609a Wii–DS Link for Windows x64](https://github.com/ATEMVEGETA/dolphin/releases/download/wii-ds-link-v0.1.0-beta.1/Dolphin-2609a-WiiDS-Link-Windows-x64-v0.1.0-beta.1.zip)**
+**[Download Dolphin 2609a Wii–DS Link for Windows x64](https://github.com/ATEMVEGETA/dolphin/releases/download/wii-ds-link-v0.2.0-beta.1/Dolphin-2609a-WiiDS-Link-Windows-x64-v0.2.0-beta.1.zip)**
 
-See the [v0.1.0-beta.1 release page](https://github.com/ATEMVEGETA/dolphin/releases/tag/wii-ds-link-v0.1.0-beta.1)
+See the [v0.2.0-beta.1 release page](https://github.com/ATEMVEGETA/dolphin/releases/tag/wii-ds-link-v0.2.0-beta.1)
 for its SHA-256 checksum and source snapshot links. The
-[combined package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.1.0-beta.1)
+[combined package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.2.0-beta.1)
 also includes the matching melonDS build.
+
+This release adds independent DS associations and multiplayer reply tracking.
+The bridge has 15 DS client slots; eight-client transport passed automated
+checks. Actual four-player Battle Revolution and one-DS Ranch regression tests
+were reported successful. Each game still limits its own player count. Use
+both emulators from v0.2.0-beta.1 when testing multiplayer.
 
 See
 [WiiDSBridge.md](Source/Core/Core/IOS/Network/WD/WiiDSBridge.md) for technical
-details and limitations. Games, Wii NAND data, firmware, and saves are not
+details and limitations, and [WII-DS-BUILD.md](WII-DS-BUILD.md) for this Windows
+build. Games, Wii NAND data, firmware, and saves are not
 included.
 
 [Homepage](https://dolphin-emu.org/) | [Project Site](https://github.com/dolphin-emu/dolphin) | [Buildbot](https://dolphin.ci/) | [Forums](https://forums.dolphin-emu.org/) | [Wiki](https://wiki.dolphin-emu.org/) | [GitHub Wiki](https://github.com/dolphin-emu/dolphin/wiki) | [Issue Tracker](https://bugs.dolphin-emu.org/projects/emulator/issues) | [Coding Style](https://github.com/dolphin-emu/dolphin/blob/master/Contributing.md) | [Transifex Page](https://app.transifex.com/dolphinemu/dolphin-emu/dashboard/) | [Analytics](https://mon.dolphin-emu.org/)

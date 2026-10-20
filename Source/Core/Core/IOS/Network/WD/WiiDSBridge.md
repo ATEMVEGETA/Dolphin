@@ -1,7 +1,7 @@
 # Wii-DS Link (unofficial fork)
 
 This addition connects Dolphin's emulated `/dev/net/wd/command` device to a
-compatible melonDS Wii-DS Link build through UDP on loopback port 7065. It does
+compatible melonDS Wii-DS Link build through UDP on loopback ports 7065-7080. It does
 not connect to a real Wii or DS and does not use a Wi-Fi adapter or an external
 relay program. This is a downstream fork, not an official Dolphin release.
 
@@ -11,8 +11,9 @@ Before starting a game, enable **Connect to melonDS** under
 **Configuration -> Wii -> Misc Settings**. In the matching melonDS build,
 enable **Connect to Dolphin**. Both options default to off and persist between
 launches. The emulators may be opened in either order; the link is established
-only when the games request it through their own connection menus. Only one
-Dolphin and one melonDS link participant on the same PC are supported.
+only when the games request it through their own connection menus. This local
+multi-DS release tracks one Dolphin and up to 15 associated melonDS
+clients on the same PC. Individual games impose their own player limits.
 
 The setting applies to the next game launch. It is disabled in the settings UI
 while emulation is active. Ordinary WD behavior is retained when it is off.
@@ -29,15 +30,26 @@ application bytes. A type-7 `WIIDSBRIDGE/1` message carries the unmodified
 16-byte guest MP configuration separately from application data. The melonDS
 virtual radio reproduces Nintendo MP timing and delivers the game's real
 reply frames. The returned WD envelope exposes those replies to the Wii guest.
+New companions advertise M2 capability: type 9 carries a BE32 round ID, the
+16-byte configuration and application bytes; type 10 returns that round ID
+with the original DS radio packet; type 11 carries the ID and BE16 failure
+mask. Replies are checked against the endpoint, MAC, assigned AID and session
+generation. Each completed round produces one WD MP-end envelope containing
+all observed per-client records. No response from a missing DS is invented.
+An unfinished round expires after a one-second host-transport watchdog; this
+does not replace the guest's radio reply-slot timing. Pending rounds are
+bounded and completed in order. Legacy type-7 clients are supported alone.
 The Wii title's actual Download Play client is transferred by its normal
 protocol and runs from DS RAM; this backend does not replace it with a cached
 ROM, patch game CPUs, or force application-level success.
 
-Discovery uses a heartbeat, peer-session identity and expiry. A late or
+Discovery uses per-client heartbeats, peer-session identities and expiry. A late or
 restarted melonDS peer receives the current cached beacon. Stopping or closing
 the WD session sends a STOP control message and clears incoming radio state;
 savestate restore also discards the live radio peer. The dedicated socket is
-nonblocking and bound only to localhost. Packet work and incoming radio queues
+nonblocking and bound only to localhost. A client joining, leaving or timing
+out does not replace the other players. Association retries retain the same
+AID. Duplicate guest MACs are rejected. Packet work and incoming radio queues
 are bounded.
 
 The single-parent virtual radio uses BSSID `00:17:ab:4d:b9:e0`. When enabled,
@@ -56,11 +68,12 @@ transport to SFML 3. The source remains GPL-2.0-or-later, like Dolphin.
 
 The earlier experimental pair was tested with My Pokemon Ranch + Diamond/Pearl and
 Pokemon Battle Revolution + properly paired DS saves. Those results establish
-the protocol implementation's history. The public beta uses the same protocol
-implementation and passed isolated transport/startup validation, but still
-needs a fresh retail transfer test on its exact binaries. Other Wii-DS titles,
-multi-client links and every ROM/save
-combination are not certified. Games can impose their own cartridge/save
+the protocol implementation's history. For v0.2.0-beta.1, the tester reported
+successful four-player Battle Revolution, one-player disconnect/rejoin while
+the others stayed connected, and Ranch transfer/save/shutdown regression
+checks. Automated helper and socket checks exercised eight DS clients and
+separate processes; eight-player retail gameplay has not been established.
+These results do not certify every game or ROM/save combination. Games can impose their own cartridge/save
 identity rules independently of transport compatibility.
 
 No games, BIOS, firmware, NAND or save data belong in a distributable package.

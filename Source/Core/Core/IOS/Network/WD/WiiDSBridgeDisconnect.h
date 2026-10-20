@@ -17,6 +17,7 @@ struct WiiDSBridgeClient
 {
   std::array<u8, 6> mac{};
   bool associated = false;
+  u16 aid = 1;
 };
 
 // Consume only a real, unprotected management frame from the current peer.
@@ -41,7 +42,8 @@ ConsumeWiiDSBridgeDisconnect(const u8* frame, std::size_t frame_size,
   std::array<u8, 0x94> notification{};
   notification[3] = 1;
   std::copy_n(frame + 10, 6, notification.begin() + 8);
-  notification[0x0f] = 1;  // The existing bridge assigns its single peer AID 1.
+  notification[0x0e] = u8(client.aid >> 8);
+  notification[0x0f] = u8(client.aid);
   notification[0x10] = frame[25];
   notification[0x11] = frame[24];
   client.associated = false;  // Suppress retries and duplicate disconnects.

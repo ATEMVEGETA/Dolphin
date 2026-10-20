@@ -17,6 +17,7 @@
 #include "Common/Swap.h"
 #include "Core/IOS/Device.h"
 #include "Core/IOS/Network/WD/WiiDSBridgeDisconnect.h"
+#include "Core/IOS/Network/WD/WiiDSBridgeMultiplayer.h"
 
 #include <SFML/Network/UdpSocket.hpp>
 
@@ -169,10 +170,14 @@ private:
   void SendBridgeBeacon(const IOCtlVRequest& request);
   void SendBridgeFrame(const IOCtlVRequest& request);
   void ClearBridgePeer();
+  void RemoveBridgePeer(unsigned short port, u16 reason, bool notify);
+  void QueueBridgeDisconnect(const WD::WiiDSBridgeClient& client, u16 reason);
+  void ProcessBridgeRounds();
   void StopBridgeSession();
   void WriteBridgeDiagnostic(std::string_view message) const;
   void SendBridgeManagementResponse(const u8* request_frame, std::size_t frame_size,
-                                    u8 response_subtype, u8 channel);
+                                    u8 response_subtype, u8 channel, unsigned short port,
+                                    u16 aid = 0, u16 status = 0);
 
   s32 m_ipc_owner_fd = -1;
   WD::Mode m_mode = WD::Mode::NotInitialized;
@@ -199,17 +204,16 @@ private:
   u64 m_wii_ds_diagnostic_notifications = 0;
   u64 m_wii_ds_diagnostic_beacons = 0;
   std::vector<u8> m_wii_ds_bridge_beacon;
-  std::string m_wii_ds_bridge_peer_identity;
+  WD::WiiDSBridgePeerTable m_wii_ds_bridge_peers;
+  WD::WiiDSBridgeRounds m_wii_ds_bridge_rounds;
   std::chrono::steady_clock::time_point m_wii_ds_bridge_last_hello{};
   std::chrono::steady_clock::time_point m_wii_ds_bridge_last_bind{};
-  std::chrono::steady_clock::time_point m_wii_ds_bridge_last_ack{};
+  std::chrono::steady_clock::time_point m_wii_ds_bridge_last_beacon_event{};
   bool m_wii_ds_bridge_announced = false;
-  bool m_wii_ds_bridge_connected = false;
   bool m_wii_ds_native_disconnect_enabled = false;
   bool m_wii_ds_mp_config_enabled = false;
   u32 m_wii_ds_mp_config_samples = 0;
   std::array<u8, 16> m_wii_ds_mp_config_last{};
-  WD::WiiDSBridgeClient m_wii_ds_bridge_client;
   u32 m_wii_ds_beacon_sent_events = 0;
 };
 }  // namespace IOS::HLE

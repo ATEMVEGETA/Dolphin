@@ -436,6 +436,7 @@ add_library(core
   IOS/Network/WD/Command.h
   IOS/Network/WD/WiiDSBridgeDisconnect.h
   IOS/Network/WD/WiiDSBridgeMPConfig.h
+  IOS/Network/WD/WiiDSBridgeMultiplayer.h
   IOS/Network/WD/WiiDSBridgeSettings.h
   IOS/SDIO/SDIOSlot0.cpp
   IOS/SDIO/SDIOSlot0.h
