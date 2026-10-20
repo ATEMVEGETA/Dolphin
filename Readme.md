@@ -228,3 +228,6 @@ Options:
   -q, --quiet           Mute all messages except for errors.
   -g, --gameonly        Only extracts the DATA partition.
 ```
+
+## Development Note
+This project was developed with the assistance of OpenAI Codex (AI), which helped with coding, debugging, and implementing new features. I provided the ideas, requirements, and direction for the project, along with testing and feedback throughout development.
