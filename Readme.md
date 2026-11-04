@@ -12,18 +12,23 @@
 
 ## Wii–DS Link download
 
-**[Download Dolphin 2609a Wii–DS Link for Windows x64](https://github.com/ATEMVEGETA/dolphin/releases/download/wii-ds-link-v0.2.0-beta.1/Dolphin-2609a-WiiDS-Link-Windows-x64-v0.2.0-beta.1.zip)**
+**[Download Dolphin 2609a Wii–DS Link for Windows x64](https://github.com/ATEMVEGETA/dolphin/releases/download/wii-ds-link-v0.2.0-beta.3/Dolphin-2609a-WiiDS-Link-Windows-x64-v0.2.0-beta.3.zip)**
 
-See the [v0.2.0-beta.1 release page](https://github.com/ATEMVEGETA/dolphin/releases/tag/wii-ds-link-v0.2.0-beta.1)
+See the [v0.2.0-beta.3 release page](https://github.com/ATEMVEGETA/dolphin/releases/tag/wii-ds-link-v0.2.0-beta.3)
 for its SHA-256 checksum and source snapshot links. The
-[combined package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.2.0-beta.1)
+[combined package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.2.0-beta.3)
 also includes the matching melonDS build.
 
-This release adds independent DS associations and multiplayer reply tracking.
-The bridge has 15 DS client slots; eight-client transport passed automated
-checks. Actual four-player Battle Revolution and one-DS Ranch regression tests
-were reported successful. Each game still limits its own player count. Use
-both emulators from v0.2.0-beta.1 when testing multiplayer.
+This update fixes Battle Revolution Mystery Gift receipt by keeping WD, NCD
+and the virtual radio on Dolphin's normal configured identity. No manual MAC
+change is needed. **Update both emulators to v0.2.0-beta.3.** The tester
+confirmed receipt and a repeated successful attempt with this exact pair.
+
+Multi-DS support is retained: 15 client slots, subject to each game's limit;
+eight-client automated checks passed with a non-default parent address.
+Four-player Battle Revolution and Ranch retail results are from beta.1, not
+freshly retested for this update. The source bases remain Dolphin 2609a and
+melonDS 1.1. Fixed macOS binaries are not published yet.
 
 See
 [WiiDSBridge.md](Source/Core/Core/IOS/Network/WD/WiiDSBridge.md) for technical
