@@ -28,7 +28,22 @@ Multi-DS support is retained: 15 client slots, subject to each game's limit;
 eight-client automated checks passed with a non-default parent address.
 Four-player Battle Revolution and Ranch retail results are from beta.1, not
 freshly retested for this update. The source bases remain Dolphin 2609a and
-melonDS 1.1. Fixed macOS binaries are not published yet.
+melonDS 1.1.
+
+### Experimental macOS downloads
+
+Native **Apple Silicon (arm64)** and **Intel (x86_64)** builds with the beta.3
+fix are available in the [macOS tester prerelease](https://github.com/ATEMVEGETA/Dolphin/releases/tag/wii-ds-link-v0.2.0-beta.3-macos.1).
+Both require **macOS 15 or newer**, overriding the generic upstream minimum
+listed below. Use the matching melonDS from the
+[combined macOS package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.2.0-beta.3-macos.1).
+Compilation, native startup and automated link checks passed; actual Mac
+gameplay and transfers are **not yet verified**. These apps are ad-hoc signed,
+not Developer-ID signed or notarized. This candidate uses Metal/OpenGL;
+Vulkan, built-in FFmpeg dumping and auto-update are disabled. See the
+[Mac testing guide](https://github.com/ATEMVEGETA/Wii-DS-Link/blob/main/MACOS-TESTING.md)
+for setup, limitations and reporting results. Windows remains the recommended
+game-tested download above.
 
 See
 [WiiDSBridge.md](Source/Core/Core/IOS/Network/WD/WiiDSBridge.md) for technical
