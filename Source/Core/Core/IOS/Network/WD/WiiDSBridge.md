@@ -52,11 +52,16 @@ out does not replace the other players. Association retries retain the same
 AID. Duplicate guest MACs are rejected. Packet work and incoming radio queues
 are bounded.
 
-The single-parent virtual radio uses BSSID `00:17:ab:4d:b9:e0`. When enabled,
-the WD device reports this address through `WD_GetInfo`, consistently with the
-melonDS beacons, management responses and disconnect validation. This scoped
-virtual-adapter address does not rewrite Dolphin's ordinary networking MAC or
-the user's `WirelessMac` configuration. Disabled WD behavior is unchanged.
+The virtual radio uses Dolphin's normal configured MAC, consistently through
+`WD_GetInfo`, NCD, beacons, management responses and disconnect validation.
+P1-capable companions receive that six-byte identity atomically with the
+130-byte native beacon in a type-12 message. This avoids the former mismatch
+between the fixed virtual BSSID and the NCD address embedded by some games.
+The user's `WirelessMac` configuration and ordinary networking are not changed.
+An old companion can only be used when the configured MAC already equals its
+legacy BSSID `00:17:ab:4d:b9:e0`; otherwise it is not registered and diagnostics
+report `PEER_UPGRADE_REQUIRED`. Use a matching updated pair, rather than editing
+the user's MAC as a workaround. Disabled WD behavior is unchanged.
 
 ## Compatibility and provenance
 

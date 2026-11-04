@@ -33,6 +33,7 @@ struct WiiDSBridgePeer
   unsigned short port = 0;
   std::string identity;
   bool multiplayer = false;
+  bool parent_identity = false;
   u64 generation = 0;
   WiiDSBridgeClock::time_point last_ack{};
   u8 channel = 1;
@@ -71,12 +72,13 @@ public:
   }
 
   Registration Register(unsigned short port, std::string identity, bool multiplayer,
-                        WiiDSBridgeClock::time_point now)
+                        WiiDSBridgeClock::time_point now, bool parent_identity = false)
   {
     if (port < WiiDSBridgeFirstPort || port > WiiDSBridgeLastPort)
       return {RegisterResult::Full, nullptr, {}};
     auto* peer = Find(port);
-    if (peer && peer->identity == identity && peer->multiplayer == multiplayer)
+    if (peer && peer->identity == identity && peer->multiplayer == multiplayer &&
+        peer->parent_identity == parent_identity)
     {
       peer->last_ack = now;
       return {RegisterResult::Unchanged, peer, {}};
@@ -104,6 +106,7 @@ public:
     peer->port = port;
     peer->identity = std::move(identity);
     peer->multiplayer = multiplayer;
+    peer->parent_identity = parent_identity;
     peer->generation = ++m_generation;
     peer->last_ack = now;
     return {replaced ? RegisterResult::Replaced : RegisterResult::Added, peer, old_client};

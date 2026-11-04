@@ -22,6 +22,7 @@
 #include "Core/DolphinAnalytics.h"
 #include "Core/HW/Memmap.h"
 #include "Core/IOS/Network/MACUtils.h"
+#include "Core/IOS/Network/WD/WiiDSBridgeIdentity.h"
 #include "Core/IOS/Network/WD/WiiDSBridgeMPConfig.h"
 #include "Core/IOS/Network/WD/WiiDSBridgeSettings.h"
 #include "Core/System.h"
@@ -34,13 +35,9 @@ namespace
 //                           Channel:   FEDC BA98 7654 3210
 constexpr u16 LegalChannelMask =      0b0111'1111'1111'1110u;
 constexpr u16 LegalNitroChannelMask = 0b0011'1111'1111'1110u;
-// The bridge is a single-parent virtual radio. Keep WD_GetInfo and raw
-// management replies consistent with the BSSID used by the melonDS radio.
-constexpr Common::MACAddress WiiDSBridgeMAC{0x00, 0x17, 0xab, 0x4d, 0xb9, 0xe0};
 constexpr std::string_view WiiDSBridgeHello = "WIIDSBRIDGE/1 DOLPHIN HELLO";
 constexpr std::string_view WiiDSBridgeAck = "WIIDSBRIDGE/1 MELONDS ACK";
 constexpr std::array<u8, 8> WiiDSBridgeBinaryMagic{'W', 'D', 'S', 'B', '0', '0', '0', '1'};
-constexpr u8 WiiDSBridgeBeaconMessage = 2;
 constexpr u8 WiiDSBridgeDSFrameMessage = 3;
 constexpr u8 WiiDSBridgeWiiRawFrameMessage = 5;
 constexpr u8 WiiDSBridgeBeaconSentMessage = 6;
@@ -117,9 +114,8 @@ NetWDCommandDevice::NetWDCommandDevice(EmulationKernel& ios, const std::string& 
   m_wii_ds_mp_config_enabled = true;
   if (m_wii_ds_bridge_enabled)
   {
-    // This is scoped to the virtual WD device, never the user's ordinary
-    // networking MAC or Config::MAIN_WIRELESS_MAC.
-    m_info.mac = WiiDSBridgeMAC;
+    // WD and NCD must report the same configured radio identity. P1
+    // companions learn it with the beacon; never rewrite the user's MAC.
     const auto status = m_wii_ds_bridge_socket.bind(sf::Socket::AnyPort, sf::IpAddress::LocalHost);
     m_wii_ds_bridge_last_bind = std::chrono::steady_clock::now();
     WriteBridgeDiagnostic(fmt::format("event=DEVICE_READY bindStatus={} port={}",
@@ -223,10 +219,21 @@ void NetWDCommandDevice::Update()
            (message.starts_with(WiiDSBridgeAck) && message.size() > WiiDSBridgeAck.size() &&
             message[WiiDSBridgeAck.size()] == ' ')))
       {
+        const bool parent_identity = WD::WiiDSBridgeSupportsParentIdentity(message);
+        if (!WD::CanAdvertiseWiiDSBridgeParent(m_info.mac, parent_identity))
+        {
+          // An older companion cannot represent this parent. Do not register
+          // it as connected or advertise a beacon with an invented BSSID.
+          RemoveBridgePeer(sender_port, 4, true);
+          if (DiagnosticSample(++m_wii_ds_diagnostic_upgrade_required))
+            WriteBridgeDiagnostic(fmt::format(
+                "event=PEER_UPGRADE_REQUIRED port={} reason=parent_identity", sender_port));
+          continue;
+        }
         auto* previous = m_wii_ds_bridge_peers.Find(sender_port);
         const auto previous_generation = previous ? previous->generation : 0;
         const auto registration = m_wii_ds_bridge_peers.Register(
-            sender_port, std::string(message), message.ends_with(" M2"), now);
+            sender_port, std::string(message), message.ends_with(" M2"), now, parent_identity);
         if (!registration.peer)
         {
           WriteBridgeDiagnostic(fmt::format("event=PEER_REJECT port={} reason={}", sender_port,
@@ -240,19 +247,18 @@ void NetWDCommandDevice::Update()
             m_wii_ds_bridge_rounds.RemovePeer(sender_port, previous_generation);
           if (registration.previous_client)
             QueueBridgeDisconnect(*registration.previous_client, 3);
-          WriteBridgeDiagnostic(fmt::format("event=PEER_READY port={} m2={}", sender_port,
-                                            registration.peer->multiplayer));
+          WriteBridgeDiagnostic(fmt::format("event=PEER_READY port={} m2={} p1={}", sender_port,
+                                            registration.peer->multiplayer,
+                                            registration.peer->parent_identity));
           if (m_wii_ds_bridge_diagnostics)
             INFO_LOG_FMT(IOS_NET, "Wii-DS bridge: melonDS peer ready ({})", message);
         }
         if (changed && !m_wii_ds_bridge_beacon.empty())
         {
-          const auto status = m_wii_ds_bridge_socket.send(
-              m_wii_ds_bridge_beacon.data(), m_wii_ds_bridge_beacon.size(),
-              sf::IpAddress::LocalHost, sender_port);
+          std::size_t packet_size = 0;
+          const auto status = SendBridgeBeaconToPeer(*registration.peer, &packet_size);
           WriteBridgeDiagnostic(fmt::format("event=BEACON_REPLAY bytes={} status={}",
-                                            m_wii_ds_bridge_beacon.size(),
-                                            static_cast<int>(status)));
+                                            packet_size, static_cast<int>(status)));
         }
       }
       else if (m_wii_ds_bridge_peers.Find(sender_port) && received == 11 &&
@@ -767,10 +773,10 @@ void NetWDCommandDevice::DoState(PointerWrap& p)
   if (p.IsReadMode())
   {
     StopBridgeSession();
-    // Offline states made with the bridge disabled contain the normal random
-    // WD MAC. Preserve the enabled virtual radio's identity after restoring.
+    // An offline state may contain an older cached radio identity. Keep the
+    // enabled bridge consistent with the same current MAC getter used by NCD.
     if (m_wii_ds_bridge_enabled)
-      m_info.mac = WiiDSBridgeMAC;
+      m_info.mac = Net::GetMACAddress();
   }
 }
 
@@ -1070,6 +1076,23 @@ void NetWDCommandDevice::SendBridgeFrame(const IOCtlVRequest& request)
   }
 }
 
+sf::Socket::Status NetWDCommandDevice::SendBridgeBeaconToPeer(
+    const WD::WiiDSBridgePeer& peer, std::size_t* packet_size)
+{
+  const auto packet = WD::BuildWiiDSBridgeBeaconPacket(
+      m_info.mac, m_wii_ds_bridge_beacon, peer.parent_identity);
+  if (!packet)
+  {
+    if (packet_size)
+      *packet_size = 0;
+    return sf::Socket::Status::NotReady;
+  }
+  if (packet_size)
+    *packet_size = packet->size();
+  return m_wii_ds_bridge_socket.send(packet->data(), packet->size(), sf::IpAddress::LocalHost,
+                                      peer.port);
+}
+
 void NetWDCommandDevice::SendBridgeBeacon(const IOCtlVRequest& request)
 {
   if (!m_wii_ds_bridge_enabled)
@@ -1084,38 +1107,31 @@ void NetWDCommandDevice::SendBridgeBeacon(const IOCtlVRequest& request)
     return;
   }
 
-  constexpr std::size_t payload_size = 2 + 128;
-  std::array<u8, 11 + payload_size> packet{};
-  std::copy(WiiDSBridgeBinaryMagic.begin(), WiiDSBridgeBinaryMagic.end(), packet.begin());
-  packet[8] = WiiDSBridgeBeaconMessage;
-  packet[9] = u8(payload_size >> 8);
-  packet[10] = u8(payload_size);
-
+  std::array<u8, WD::WiiDSBridgeNativeBeaconSize> beacon{};
   auto& memory = GetSystem().GetMemory();
-  memory.CopyFromEmu(packet.data() + 11, timestamp_vector->address, 2);
-  memory.CopyFromEmu(packet.data() + 13, data_vector->address, 128);
+  memory.CopyFromEmu(beacon.data(), timestamp_vector->address, 2);
+  memory.CopyFromEmu(beacon.data() + 2, data_vector->address, 128);
 
-  m_wii_ds_bridge_beacon.assign(packet.begin(), packet.end());
+  m_wii_ds_bridge_beacon.assign(beacon.begin(), beacon.end());
   auto status = sf::Socket::Status::NotReady;
   if (m_wii_ds_bridge_socket.getLocalPort() != 0)
   {
     for (const auto& peer : m_wii_ds_bridge_peers.Peers())
     {
       if (peer.port != 0)
-        status = m_wii_ds_bridge_socket.send(packet.data(), packet.size(),
-                                             sf::IpAddress::LocalHost, peer.port);
+        status = SendBridgeBeaconToPeer(peer);
     }
   }
   if (DiagnosticSample(++m_wii_ds_diagnostic_beacons))
     WriteBridgeDiagnostic(
         fmt::format("event=BEACON_CONFIG n={} gameId={:02x}{:02x}{:02x}{:02x} status={}",
-                    m_wii_ds_diagnostic_beacons, packet[17], packet[18], packet[19], packet[20],
+                    m_wii_ds_diagnostic_beacons, beacon[6], beacon[7], beacon[8], beacon[9],
                     static_cast<int>(status)));
   if (m_wii_ds_bridge_diagnostics)
     INFO_LOG_FMT(
         IOS_NET,
         "Wii-DS bridge: forwarded Nintendo beacon (game id {:02x}{:02x}{:02x}{:02x}, status {})",
-        packet[13 + 4], packet[13 + 5], packet[13 + 6], packet[13 + 7], static_cast<int>(status));
+        beacon[6], beacon[7], beacon[8], beacon[9], static_cast<int>(status));
 }
 
 std::optional<IPCReply> NetWDCommandDevice::IOCtlV(const IOCtlVRequest& request)

@@ -168,6 +168,8 @@ private:
   IPCReply Disassociate(const IOCtlVRequest& request);
   IPCReply GetInfo(const IOCtlVRequest& request) const;
   void SendBridgeBeacon(const IOCtlVRequest& request);
+  sf::Socket::Status SendBridgeBeaconToPeer(const WD::WiiDSBridgePeer& peer,
+                                          std::size_t* packet_size = nullptr);
   void SendBridgeFrame(const IOCtlVRequest& request);
   void ClearBridgePeer();
   void RemoveBridgePeer(unsigned short port, u16 reason, bool notify);
@@ -203,6 +205,9 @@ private:
   u64 m_wii_ds_diagnostic_recv_frames = 0;
   u64 m_wii_ds_diagnostic_notifications = 0;
   u64 m_wii_ds_diagnostic_beacons = 0;
+  u64 m_wii_ds_diagnostic_upgrade_required = 0;
+  // Canonical native beacon body (timestamp 2 + Nintendo game info 128), not
+  // a wire packet. Fresh and replayed advertisements share one encoder.
   std::vector<u8> m_wii_ds_bridge_beacon;
   WD::WiiDSBridgePeerTable m_wii_ds_bridge_peers;
   WD::WiiDSBridgeRounds m_wii_ds_bridge_rounds;
