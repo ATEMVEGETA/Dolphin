@@ -126,29 +126,43 @@ NetWDCommandDevice::NetWDCommandDevice(EmulationKernel& ios, const std::string& 
 
 NetWDCommandDevice::~NetWDCommandDevice()
 {
+  if (m_wii_ds_bridge_diagnostics)
+    WriteBridgeDiagnostic("event=SESSION_STOP_CAUSE source=device_destroy");
   StopBridgeSession();
 }
 
 void NetWDCommandDevice::WriteBridgeDiagnostic(std::string_view message) const
 {
-  if (!m_wii_ds_bridge_enabled || !m_wii_ds_bridge_diagnostics)
+  if (!m_wii_ds_bridge_enabled || !m_wii_ds_bridge_diagnostics || m_wii_ds_diagnostic_full)
     return;
   const auto path = File::GetUserPath(D_LOGS_IDX) + "wii-ds-bridge.log";
   if (!File::CreateFullPath(path))
     return;
   File::IOFile log(path, "ab");
-  if (!log || log.GetSize() >= WiiDSDiagnosticMaxFileSize)
+  if (!log)
     return;
+  if (log.GetSize() >= WiiDSDiagnosticMaxFileSize)
+  {
+    m_wii_ds_diagnostic_full = true;
+    return;
+  }
   // Only bounded scalar records are written here, never game payloads or guest-memory probes.
   const auto time = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch())
                         .count();
+  const auto steady_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now().time_since_epoch())
+                               .count();
   std::string body(message.substr(0, 384));
   std::replace(body.begin(), body.end(), '\n', ' ');
   std::replace(body.begin(), body.end(), '\r', ' ');
-  const auto record = fmt::format("unixMs={} {}\n", time, body);
+  const auto record =
+      fmt::format("unixMs={} steadyMs={} record={} session={} {}\n", time, steady_time,
+                  ++m_wii_ds_diagnostic_records, m_wii_ds_diagnostic_session, body);
   if (log.GetSize() + record.size() <= WiiDSDiagnosticMaxFileSize)
     log.WriteString(record);
+  else
+    m_wii_ds_diagnostic_full = true;
 }
 
 void NetWDCommandDevice::Update()
@@ -168,7 +182,8 @@ void NetWDCommandDevice::Update()
       if (now - m_wii_ds_bridge_last_bind < std::chrono::seconds(1))
         return;
       m_wii_ds_bridge_last_bind = now;
-      const auto status = m_wii_ds_bridge_socket.bind(sf::Socket::AnyPort, sf::IpAddress::LocalHost);
+      const auto status =
+          m_wii_ds_bridge_socket.bind(sf::Socket::AnyPort, sf::IpAddress::LocalHost);
       WriteBridgeDiagnostic(fmt::format("event=BIND_RETRY status={} port={}",
                                         static_cast<int>(status),
                                         m_wii_ds_bridge_socket.getLocalPort()));
@@ -195,8 +210,12 @@ void NetWDCommandDevice::Update()
       if (peer.port != 0 && now - peer.last_ack >= std::chrono::seconds(3))
       {
         const auto port = peer.port;
+        if (m_wii_ds_bridge_diagnostics)
+          WriteBridgeDiagnostic(fmt::format(
+              "event=PEER_EXPIRED port={} generation={} aid={} associated={} ackAgeMs={}", port,
+              peer.generation, peer.client.aid, peer.client.associated,
+              std::chrono::duration_cast<std::chrono::milliseconds>(now - peer.last_ack).count()));
         RemoveBridgePeer(port, 4, true);
-        WriteBridgeDiagnostic(fmt::format("event=PEER_EXPIRED port={}", port));
       }
     }
 
@@ -240,16 +259,18 @@ void NetWDCommandDevice::Update()
                                             static_cast<int>(registration.result)));
           continue;
         }
-        const bool changed = registration.result != WD::WiiDSBridgePeerTable::RegisterResult::Unchanged;
+        const bool changed =
+            registration.result != WD::WiiDSBridgePeerTable::RegisterResult::Unchanged;
         if (changed)
         {
           if (previous_generation != 0)
             m_wii_ds_bridge_rounds.RemovePeer(sender_port, previous_generation);
           if (registration.previous_client)
             QueueBridgeDisconnect(*registration.previous_client, 3);
-          WriteBridgeDiagnostic(fmt::format("event=PEER_READY port={} m2={} p1={}", sender_port,
-                                            registration.peer->multiplayer,
-                                            registration.peer->parent_identity));
+          WriteBridgeDiagnostic(fmt::format(
+              "event=PEER_READY port={} m2={} p1={} generation={} replaced={}", sender_port,
+              registration.peer->multiplayer, registration.peer->parent_identity,
+              registration.peer->generation, previous_generation != 0));
           if (m_wii_ds_bridge_diagnostics)
             INFO_LOG_FMT(IOS_NET, "Wii-DS bridge: melonDS peer ready ({})", message);
         }
@@ -257,8 +278,8 @@ void NetWDCommandDevice::Update()
         {
           std::size_t packet_size = 0;
           const auto status = SendBridgeBeaconToPeer(*registration.peer, &packet_size);
-          WriteBridgeDiagnostic(fmt::format("event=BEACON_REPLAY bytes={} status={}",
-                                            packet_size, static_cast<int>(status)));
+          WriteBridgeDiagnostic(fmt::format("event=BEACON_REPLAY bytes={} status={}", packet_size,
+                                            static_cast<int>(status)));
         }
       }
       else if (m_wii_ds_bridge_peers.Find(sender_port) && received == 11 &&
@@ -301,25 +322,40 @@ void NetWDCommandDevice::Update()
         const std::size_t prefix_size = tagged ? 4 : 0;
         auto* peer = m_wii_ds_bridge_peers.Find(sender_port);
         if (tagged && !peer->multiplayer)
+        {
+          if (m_wii_ds_bridge_diagnostics && DiagnosticSample(++m_wii_ds_diagnostic_rejects))
+            WriteBridgeDiagnostic(
+                fmt::format("event=RADIO_REJECT port={} reason=tagged_without_m2 bytes={}",
+                            sender_port, received));
           continue;
+        }
         if (received == 11 + length &&
             length >= prefix_size + WiiDSRadioMetadataSize + IEEE80211HeaderSize)
         {
           const u32 round_id = tagged ? (u32(u8(reply[11])) << 24) | (u32(u8(reply[12])) << 16) |
-                                           (u32(u8(reply[13])) << 8) | u8(reply[14]) :
+                                            (u32(u8(reply[13])) << 8) | u8(reply[14]) :
                                         0;
           const auto* metadata = reinterpret_cast<const u8*>(reply.data() + 11 + prefix_size);
           const auto* frame = metadata + WiiDSRadioMetadataSize;
           const std::size_t frame_size = length - prefix_size - WiiDSRadioMetadataSize;
           const u8 channel = metadata[9];
-          if ((u16(metadata[10]) | (u16(metadata[11]) << 8)) != frame_size ||
-              frame_size > 2048 || channel < 1 || channel > 13)
+          if ((u16(metadata[10]) | (u16(metadata[11]) << 8)) != frame_size || frame_size > 2048 ||
+              channel < 1 || channel > 13)
+          {
+            if (m_wii_ds_bridge_diagnostics && DiagnosticSample(++m_wii_ds_diagnostic_rejects))
+              WriteBridgeDiagnostic(fmt::format(
+                  "event=RADIO_REJECT port={} reason=metadata bytes={} declared={} channel={}",
+                  sender_port, frame_size, u16(metadata[10]) | (u16(metadata[11]) << 8), channel));
             continue;
+          }
           ++m_wii_ds_diagnostic_rx_frames;
           if ((frame[0] & 0x0c) == 0 || DiagnosticSample(m_wii_ds_diagnostic_rx_frames))
-            WriteBridgeDiagnostic(fmt::format(
-                "event=DS_FRAME n={} bytes={} fc={:02x}{:02x} channel={}",
-                m_wii_ds_diagnostic_rx_frames, frame_size, frame[0], frame[1], channel));
+            WriteBridgeDiagnostic(
+                fmt::format("event=DS_FRAME n={} port={} aid={} generation={} bytes={} "
+                            "fc={:02x}{:02x} sequence={} channel={} round={}",
+                            m_wii_ds_diagnostic_rx_frames, sender_port, peer->client.aid,
+                            peer->generation, frame_size, frame[0], frame[1],
+                            (u16(frame[22]) | (u16(frame[23]) << 8)) >> 4, channel, round_id));
           if (m_wii_ds_bridge_diagnostics)
             INFO_LOG_FMT(IOS_NET,
                          "Wii-DS bridge: DS->Wii frame len={} fc={:02x}{:02x} "
@@ -331,14 +367,15 @@ void NetWDCommandDevice::Update()
           // This adapter represents one parent. Do not answer management frames
           // for another BSSID or protected/non-local radio exchanges.
           const bool parent_management =
-              !tagged && frame_type == 0 && channel >= 1 && channel <= 13 && (frame[1] & 0x43) == 0 &&
+              !tagged && frame_type == 0 && channel >= 1 && channel <= 13 &&
+              (frame[1] & 0x43) == 0 &&
               std::memcmp(frame + 4, m_info.mac.data(), m_info.mac.size()) == 0 &&
               std::memcmp(frame + 16, m_info.mac.data(), m_info.mac.size()) == 0 &&
               (frame[10] & 1) == 0;
           if (parent_management && frame_control == 0xb0 &&
-              frame_size >= IEEE80211HeaderSize + 6 + IEEE80211FCSSize &&
-              frame[24] == 0 && frame[25] == 0 && frame[26] == 1 && frame[27] == 0 &&
-              frame[28] == 0 && frame[29] == 0)
+              frame_size >= IEEE80211HeaderSize + 6 + IEEE80211FCSSize && frame[24] == 0 &&
+              frame[25] == 0 && frame[26] == 1 && frame[27] == 0 && frame[28] == 0 &&
+              frame[29] == 0)
           {
             SendBridgeManagementResponse(frame, frame_size, 0xb0, channel, sender_port);
             if (m_wii_ds_bridge_diagnostics)
@@ -354,11 +391,12 @@ void NetWDCommandDevice::Update()
             if (association.aid != 0)
               peer->channel = channel;
             SendBridgeManagementResponse(frame, frame_size, 0x10, channel, sender_port,
-                                           association.aid, association.aid == 0 ? 17 : 0);
+                                         association.aid, association.aid == 0 ? 17 : 0);
             if (association.aid == 0)
             {
-              WriteBridgeDiagnostic(fmt::format(
-                  "event=ASSOCIATION_REJECT port={} reason=duplicate_mac_or_capacity", sender_port));
+              WriteBridgeDiagnostic(
+                  fmt::format("event=ASSOCIATION_REJECT port={} reason=duplicate_mac_or_capacity",
+                              sender_port));
               continue;
             }
             // An association retry gets the same AID, without announcing a
@@ -371,8 +409,8 @@ void NetWDCommandDevice::Update()
             notification[0x0f] = u8(association.aid);
             if (m_wii_ds_bridge_notifications.size() < 256)
               m_wii_ds_bridge_notifications.emplace_back(notification);
-            WriteBridgeDiagnostic(fmt::format("event=ASSOCIATED port={} aid={}", sender_port,
-                                              association.aid));
+            WriteBridgeDiagnostic(fmt::format("event=ASSOCIATED port={} aid={} generation={}",
+                                              sender_port, association.aid, peer->generation));
             if (m_wii_ds_bridge_diagnostics)
               INFO_LOG_FMT(IOS_NET,
                            "Wii-DS bridge: answered association and queued connected notification "
@@ -392,8 +430,9 @@ void NetWDCommandDevice::Update()
                 m_wii_ds_bridge_notifications.emplace_back(*notification);
               const u16 reason =
                   static_cast<u16>((u16((*notification)[0x10]) << 8) | (*notification)[0x11]);
-              WriteBridgeDiagnostic(fmt::format("event=DS_DISCONNECT subtype={:02x} reason={}",
-                                                frame_control, reason));
+              WriteBridgeDiagnostic(
+                  fmt::format("event=DS_DISCONNECT port={} generation={} subtype={:02x} reason={}",
+                              sender_port, generation, frame_control, reason));
               if (m_wii_ds_bridge_diagnostics)
                 INFO_LOG_FMT(IOS_NET,
                              "Wii-DS bridge: received real DS disconnect subtype={:#04x} reason={} "
@@ -408,7 +447,14 @@ void NetWDCommandDevice::Update()
                 channel != peer->channel || (frame[1] & 0x43) != 1 ||
                 std::memcmp(frame + 4, m_info.mac.data(), m_info.mac.size()) != 0)
             {
-              WriteBridgeDiagnostic(fmt::format("event=DS_FRAME_REJECT port={} reason=client", sender_port));
+              if (m_wii_ds_bridge_diagnostics && DiagnosticSample(++m_wii_ds_diagnostic_rejects))
+                WriteBridgeDiagnostic(fmt::format(
+                    "event=DS_FRAME_REJECT port={} reason=client associated={} bytes={} "
+                    "sourceMatch={} channelMatch={} flagsMatch={} parentMatch={}",
+                    sender_port, peer->client.associated, frame_size,
+                    std::memcmp(frame + 10, peer->client.mac.data(), peer->client.mac.size()) == 0,
+                    channel == peer->channel, (frame[1] & 0x43) == 1,
+                    std::memcmp(frame + 4, m_info.mac.data(), m_info.mac.size()) == 0));
               continue;
             }
             std::vector<u8> payload(frame + IEEE80211HeaderSize,
@@ -418,19 +464,51 @@ void NetWDCommandDevice::Update()
               constexpr std::array<u8, 6> reply_mac{0x03, 0x09, 0xbf, 0, 0, 0x10};
               if ((frame[0] != 0x18 && frame[0] != 0x58) ||
                   std::memcmp(frame + 16, reply_mac.data(), reply_mac.size()) != 0)
+              {
+                if (m_wii_ds_bridge_diagnostics && DiagnosticSample(++m_wii_ds_diagnostic_rejects))
+                  WriteBridgeDiagnostic(fmt::format(
+                      "event=RADIO_REJECT port={} reason=mp_reply_header round={} fc={:02x}",
+                      sender_port, round_id, frame[0]));
                 continue;
+              }
               if (!m_wii_ds_bridge_rounds.Receive(round_id, *peer, std::move(payload)))
-                WriteBridgeDiagnostic(fmt::format("event=ROUND_REPLY_REJECT port={} round={} aid={}",
-                                                  sender_port, round_id, peer->client.aid));
+                WriteBridgeDiagnostic(
+                    fmt::format("event=ROUND_REPLY_REJECT port={} round={} aid={}", sender_port,
+                                round_id, peer->client.aid));
+              else if (m_wii_ds_bridge_diagnostics && DiagnosticSample(round_id))
+                WriteBridgeDiagnostic(
+                    fmt::format("event=ROUND_REPLY port={} round={} aid={} generation={}",
+                                sender_port, round_id, peer->client.aid, peer->generation));
             }
             else if (m_wii_ds_bridge_received_frames.size() < 128)
             {
               // Untagged frames never satisfy an outstanding M2 round. They
               // remain independent indications for legacy/unround traffic.
-              if (auto envelope = WD::BuildWiiDSMPReceiveEnvelope({{peer->client.aid, std::move(payload)}}))
+              if (auto envelope =
+                      WD::BuildWiiDSMPReceiveEnvelope({{peer->client.aid, std::move(payload)}}))
                 m_wii_ds_bridge_received_frames.emplace_back(std::move(*envelope));
             }
+            else if (m_wii_ds_bridge_diagnostics)
+            {
+              WriteBridgeDiagnostic(
+                  fmt::format("event=RADIO_REJECT port={} reason=receive_queue_full bytes={}",
+                              sender_port, frame_size));
+            }
           }
+          else if (frame_type == 0 && m_wii_ds_bridge_diagnostics &&
+                   DiagnosticSample(++m_wii_ds_diagnostic_rejects))
+          {
+            WriteBridgeDiagnostic(fmt::format("event=MANAGEMENT_IGNORED port={} fc={:02x}{:02x} "
+                                              "parentMatch={} bytes={} channel={}",
+                                              sender_port, frame[0], frame[1], parent_management,
+                                              frame_size, channel));
+          }
+        }
+        else if (m_wii_ds_bridge_diagnostics && DiagnosticSample(++m_wii_ds_diagnostic_rejects))
+        {
+          WriteBridgeDiagnostic(fmt::format(
+              "event=RADIO_REJECT port={} reason=envelope_size bytes={} declared={} tagged={}",
+              sender_port, received, length, tagged));
         }
       }
     }
@@ -467,6 +545,10 @@ void NetWDCommandDevice::RemoveBridgePeer(unsigned short port, u16 reason, bool 
 {
   if (auto* peer = m_wii_ds_bridge_peers.Find(port))
   {
+    if (m_wii_ds_bridge_diagnostics)
+      WriteBridgeDiagnostic(fmt::format(
+          "event=PEER_REMOVE port={} generation={} aid={} associated={} reason={} notify={}", port,
+          peer->generation, peer->client.aid, peer->client.associated, reason, notify));
     m_wii_ds_bridge_rounds.RemovePeer(port, peer->generation);
     if (notify)
       QueueBridgeDisconnect(peer->client, reason);
@@ -496,8 +578,16 @@ void NetWDCommandDevice::ProcessBridgeRounds()
     {
       const auto* peer = m_wii_ds_bridge_peers.Find(recipient.port);
       if (recipient.port != 0 && peer && peer->generation == recipient.generation)
-        (void)m_wii_ds_bridge_socket.send(ack.data(), ack.size(), sf::IpAddress::LocalHost,
-                                          recipient.port);
+      {
+        const auto status = m_wii_ds_bridge_socket.send(ack.data(), ack.size(),
+                                                        sf::IpAddress::LocalHost, recipient.port);
+        if (m_wii_ds_bridge_diagnostics && (status != sf::Socket::Status::Done ||
+                                            failure_mask != 0 || DiagnosticSample(round->id)))
+          WriteBridgeDiagnostic(fmt::format("event=ROUND_ACK_TX port={} round={} generation={} "
+                                            "failures={:04x} transportStatus={}",
+                                            recipient.port, round->id, recipient.generation,
+                                            failure_mask, static_cast<int>(status)));
+      }
     }
     if (auto envelope = WD::BuildWiiDSMPReceiveEnvelope(round->Replies()))
     {
@@ -507,15 +597,23 @@ void NetWDCommandDevice::ProcessBridgeRounds()
         WriteBridgeDiagnostic("event=ROUND_RECEIVE_DROP reason=queue_full");
     }
     if (failure_mask != 0 || DiagnosticSample(round->id))
-      WriteBridgeDiagnostic(fmt::format("event=ROUND_END round={} targets={:04x} replies={:04x} failures={:04x}",
-                                        round->id, round->target_mask, round->received_mask, failure_mask));
+      WriteBridgeDiagnostic(fmt::format(
+          "event=ROUND_END round={} targets={:04x} replies={:04x} failures={:04x} "
+          "explicitFailures={:04x} elapsedMs={} queued={}",
+          round->id, round->target_mask, round->received_mask, failure_mask, round->failed_mask,
+          std::chrono::duration_cast<std::chrono::milliseconds>(now - round->started).count(),
+          m_wii_ds_bridge_rounds.Size()));
   }
 }
 
 void NetWDCommandDevice::StopBridgeSession()
 {
-  WriteBridgeDiagnostic(fmt::format("event=SESSION_STOP announced={} connected={}",
-                                    m_wii_ds_bridge_announced, !m_wii_ds_bridge_peers.Empty()));
+  WriteBridgeDiagnostic(fmt::format(
+      "event=SESSION_STOP announced={} connected={} mode={} status={} target={} rounds={} "
+      "rxQueued={} notifications={}",
+      m_wii_ds_bridge_announced, !m_wii_ds_bridge_peers.Empty(), static_cast<u32>(m_mode),
+      static_cast<u32>(m_status), static_cast<u32>(m_target_status), m_wii_ds_bridge_rounds.Size(),
+      m_wii_ds_bridge_received_frames.size(), m_wii_ds_bridge_notifications.size()));
   if (m_wii_ds_bridge_enabled && m_wii_ds_bridge_announced)
   {
     std::array<u8, 11> stop{};
@@ -524,8 +622,14 @@ void NetWDCommandDevice::StopBridgeSession()
     for (const auto& peer : m_wii_ds_bridge_peers.Peers())
     {
       if (peer.port != 0)
-        (void)m_wii_ds_bridge_socket.send(stop.data(), stop.size(), sf::IpAddress::LocalHost,
-                                          peer.port);
+      {
+        const auto status = m_wii_ds_bridge_socket.send(stop.data(), stop.size(),
+                                                        sf::IpAddress::LocalHost, peer.port);
+        if (m_wii_ds_bridge_diagnostics)
+          WriteBridgeDiagnostic(
+              fmt::format("event=SESSION_STOP_TX port={} generation={} aid={} transportStatus={}",
+                          peer.port, peer.generation, peer.client.aid, static_cast<int>(status)));
+      }
     }
   }
   ClearBridgePeer();
@@ -548,8 +652,8 @@ void NetWDCommandDevice::StopBridgeSession()
 
 void NetWDCommandDevice::SendBridgeManagementResponse(const u8* request_frame,
                                                       std::size_t frame_size, u8 response_subtype,
-                                                      u8 channel, unsigned short port,
-                                                      u16 aid, u16 status_code)
+                                                      u8 channel, unsigned short port, u16 aid,
+                                                      u16 status_code)
 {
   if (frame_size < IEEE80211HeaderSize)
     return;
@@ -559,9 +663,9 @@ void NetWDCommandDevice::SendBridgeManagementResponse(const u8* request_frame,
   // Bodies taken byte-for-byte from the successful real-Wii exchange.  The
   // Nintendo vendor IE and full rate set are part of both driver responses.
   std::array<u8, 33> association_body{0x21, 0x00, 0x00, 0x00, 0x01, 0xc0, 0x01, 0x08, 0x82,
-                                            0x84, 0x0b, 0x16, 0x24, 0x30, 0x48, 0x6c, 0x32, 0x04,
-                                            0x0c, 0x12, 0x18, 0x60, 0xdd, 0x09, 0x00, 0x10, 0x18,
-                                            0x02, 0x00, 0xf0, 0x00, 0x00, 0x00};
+                                      0x84, 0x0b, 0x16, 0x24, 0x30, 0x48, 0x6c, 0x32, 0x04,
+                                      0x0c, 0x12, 0x18, 0x60, 0xdd, 0x09, 0x00, 0x10, 0x18,
+                                      0x02, 0x00, 0xf0, 0x00, 0x00, 0x00};
   association_body[2] = u8(status_code);
   association_body[3] = u8(status_code >> 8);
   association_body[4] = u8(aid);
@@ -595,10 +699,13 @@ void NetWDCommandDevice::SendBridgeManagementResponse(const u8* request_frame,
     std::copy(authentication_body.begin(), authentication_body.end(),
               response + IEEE80211HeaderSize);
 
-  const auto status = m_wii_ds_bridge_socket.send(packet.data(), packet.size(),
-                                                  sf::IpAddress::LocalHost, port);
-  WriteBridgeDiagnostic(fmt::format("event=MANAGEMENT_RESPONSE subtype={:02x} channel={} status={}",
-                                    response_subtype, channel, static_cast<int>(status)));
+  const auto status =
+      m_wii_ds_bridge_socket.send(packet.data(), packet.size(), sf::IpAddress::LocalHost, port);
+  WriteBridgeDiagnostic(fmt::format("event=MANAGEMENT_RESPONSE subtype={:02x} channel={} status={} "
+                                    "port={} aid={} associationStatus={} sequence={}",
+                                    response_subtype, channel, static_cast<int>(status), port, aid,
+                                    status_code,
+                                    (u16(response[22]) | (u16(response[23]) << 8)) >> 4));
   if (m_wii_ds_bridge_diagnostics)
     INFO_LOG_FMT(IOS_NET, "Wii-DS bridge: sent raw management response subtype {:#04x} (status {})",
                  response_subtype, static_cast<int>(status));
@@ -618,6 +725,10 @@ void NetWDCommandDevice::ProcessRecvRequests()
     const bool disconnected = notification[3] == 1;
     if (!output || output->address == 0 || output->size < notification.size())
     {
+      if (m_wii_ds_bridge_diagnostics)
+        WriteBridgeDiagnostic(fmt::format(
+            "event=WD_NOTIFICATION_REJECT reason=output_vector provided={} needed={} type={}",
+            output ? output->size : 0, notification.size(), notification[3]));
       GetEmulationKernel().EnqueueIPCReply(Request{system, address},
                                            s32(ResultCode::IllegalParameter));
     }
@@ -626,13 +737,15 @@ void NetWDCommandDevice::ProcessRecvRequests()
       system.GetMemory().CopyToEmu(output->address, notification.data(), notification.size());
       ++m_wii_ds_diagnostic_notifications;
       if (!beacon_sent || DiagnosticSample(m_wii_ds_diagnostic_notifications))
-        WriteBridgeDiagnostic(fmt::format("event=WD_NOTIFICATION n={} type={} aid={}",
+        WriteBridgeDiagnostic(fmt::format("event=WD_NOTIFICATION n={} type={} aid={} reason={}",
                                           m_wii_ds_diagnostic_notifications, notification[3],
-                                          (u16(notification[0x0e]) << 8) | notification[0x0f]));
+                                          (u16(notification[0x0e]) << 8) | notification[0x0f],
+                                          (u16(notification[0x10]) << 8) | notification[0x11]));
       if (m_wii_ds_bridge_diagnostics)
         INFO_LOG_FMT(IOS_NET, "Wii-DS bridge: completed WD_ReceiveNotification ({})",
                      beacon_sent  ? "beacon-sent, type 3" :
-                     disconnected ? "disconnected, type 1" : "connected");
+                     disconnected ? "disconnected, type 1" :
+                                    "connected");
       // WD_ReceiveNotification returns zero through IOS; the event is in the output buffer.
       GetEmulationKernel().EnqueueIPCReply(Request{system, address}, IPC_SUCCESS);
     }
@@ -648,6 +761,8 @@ void NetWDCommandDevice::ProcessRecvRequests()
     auto frame = std::move(m_wii_ds_bridge_received_frames.front());
     if (!output || output->address == 0)
     {
+      if (m_wii_ds_bridge_diagnostics)
+        WriteBridgeDiagnostic("event=WD_RECEIVE_REJECT reason=output_vector");
       GetEmulationKernel().EnqueueIPCReply(Request{system, address},
                                            s32(ResultCode::IllegalParameter));
     }
@@ -658,6 +773,10 @@ void NetWDCommandDevice::ProcessRecvRequests()
       const u32 result_length = static_cast<u32>(frame.size());
       if (output->size < result_length)
       {
+        if (m_wii_ds_bridge_diagnostics)
+          WriteBridgeDiagnostic(
+              fmt::format("event=WD_RECEIVE_REJECT reason=output_capacity provided={} needed={}",
+                          output->size, result_length));
         GetEmulationKernel().EnqueueIPCReply(Request{system, address},
                                              s32(ResultCode::IllegalParameter));
       }
@@ -669,9 +788,9 @@ void NetWDCommandDevice::ProcessRecvRequests()
                                             m_wii_ds_diagnostic_recv_frames,
                                             (u16(frame[4]) << 8) | frame[5], result_length));
         if (m_wii_ds_bridge_diagnostics)
-          INFO_LOG_FMT(
-              IOS_NET,
-              "Wii-DS bridge: completed WD_ReceiveFrame envelope with {} total bytes", result_length);
+          INFO_LOG_FMT(IOS_NET,
+                       "Wii-DS bridge: completed WD_ReceiveFrame envelope with {} total bytes",
+                       result_length);
         GetEmulationKernel().EnqueueIPCReply(Request{system, address}, result_length);
       }
     }
@@ -755,6 +874,10 @@ void NetWDCommandDevice::HandleStateChange()
 
   INFO_LOG_FMT(IOS_NET, "{}: done (status: {} -> {}, target was {})", __func__, status, m_status,
                target_status);
+  if (m_wii_ds_bridge_diagnostics)
+    WriteBridgeDiagnostic(fmt::format(
+        "event=WD_STATE_CHANGE previous={} current={} target={} mode={}", static_cast<u32>(status),
+        static_cast<u32>(m_status), static_cast<u32>(target_status), static_cast<u32>(m_mode)));
 }
 
 void NetWDCommandDevice::DoState(PointerWrap& p)
@@ -772,6 +895,8 @@ void NetWDCommandDevice::DoState(PointerWrap& p)
   // A restored savestate cannot restore the live localhost radio peer.
   if (p.IsReadMode())
   {
+    if (m_wii_ds_bridge_diagnostics)
+      WriteBridgeDiagnostic("event=SESSION_STOP_CAUSE source=state_restore");
     StopBridgeSession();
     // An offline state may contain an older cached radio identity. Keep the
     // enabled bridge consistent with the same current MAC getter used by NCD.
@@ -804,6 +929,13 @@ std::optional<IPCReply> NetWDCommandDevice::Open(const OpenRequest& request)
       m_mode = mode;
       m_ipc_owner_fd = request.fd;
       m_buffer_flags = buffer_flags;
+      if (m_wii_ds_bridge_enabled && m_wii_ds_bridge_diagnostics)
+      {
+        ++m_wii_ds_diagnostic_session;
+        WriteBridgeDiagnostic(fmt::format("event=WD_SESSION_BEGIN mode={} owner={} channel={}",
+                                          static_cast<u32>(m_mode), m_ipc_owner_fd,
+                                          m_info.channel));
+      }
     }
   }
 
@@ -822,6 +954,8 @@ std::optional<IPCReply> NetWDCommandDevice::Close(u32 fd)
   INFO_LOG_FMT(IOS_NET, "Closing and resetting status to Idle");
   WriteBridgeDiagnostic("event=WD_CLOSE");
   m_target_status = m_status = Status::Idle;
+  if (m_wii_ds_bridge_diagnostics)
+    WriteBridgeDiagnostic("event=SESSION_STOP_CAUSE source=wd_close");
   StopBridgeSession();
   m_wii_ds_beacon_sent_events = 0;
 
@@ -848,6 +982,8 @@ IPCReply NetWDCommandDevice::SetLinkState(const IOCtlVRequest& request)
     if (!WD::IsValidMode(m_mode))
       return IPCReply(u32(ResultCode::UnavailableCommand));
 
+    if (m_wii_ds_bridge_diagnostics)
+      WriteBridgeDiagnostic("event=SESSION_STOP_CAUSE source=link_state_off");
     StopBridgeSession();
     m_target_status = Status::Idle;
     INFO_LOG_FMT(IOS_NET, "WD_SetLinkState: setting target status to {}", m_target_status);
@@ -933,12 +1069,12 @@ IPCReply NetWDCommandDevice::Disassociate(const IOCtlVRequest& request)
       std::copy(m_info.mac.begin(), m_info.mac.end(), frame + 16);
       frame[24] = 3;
       (void)m_wii_ds_bridge_socket.send(packet.data(), packet.size(), sf::IpAddress::LocalHost,
-                                       peer.port);
+                                        peer.port);
       m_wii_ds_bridge_rounds.RemovePeer(peer.port, peer.generation);
       QueueBridgeDisconnect(peer.client, 3);
       peer.client.associated = false;
-      WriteBridgeDiagnostic(fmt::format("event=WD_DISASSOC port={} aid={}", peer.port,
-                                        peer.client.aid));
+      WriteBridgeDiagnostic(
+          fmt::format("event=WD_DISASSOC port={} aid={}", peer.port, peer.client.aid));
       return IPCReply(IPC_SUCCESS);
     }
   }
@@ -955,6 +1091,11 @@ IPCReply NetWDCommandDevice::GetInfo(const IOCtlVRequest& request) const
   auto& system = GetSystem();
   auto& memory = system.GetMemory();
   memory.CopyToEmu(vector->address, &m_info, sizeof(m_info));
+  if (m_wii_ds_bridge_diagnostics)
+    WriteBridgeDiagnostic(fmt::format(
+        "event=WD_INFO channel={} channels={:04x} mac={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        m_info.channel, static_cast<u16>(m_info.enabled_channels), m_info.mac[0], m_info.mac[1],
+        m_info.mac[2], m_info.mac[3], m_info.mac[4], m_info.mac[5]));
   return IPCReply(IPC_SUCCESS);
 }
 
@@ -1008,13 +1149,17 @@ void NetWDCommandDevice::SendBridgeFrame(const IOCtlVRequest& request)
       return;
     }
     ProcessBridgeRounds();
-    round = m_wii_ds_bridge_rounds.Begin(mask, m_wii_ds_bridge_peers,
-                                        std::chrono::steady_clock::now());
+    round =
+        m_wii_ds_bridge_rounds.Begin(mask, m_wii_ds_bridge_peers, std::chrono::steady_clock::now());
     if (!round)
     {
       WriteBridgeDiagnostic("event=WD_SEND_REJECT reason=round_queue_full");
       return;
     }
+    if (m_wii_ds_bridge_diagnostics && DiagnosticSample(*round))
+      WriteBridgeDiagnostic(fmt::format(
+          "event=ROUND_BEGIN round={} targets={:04x} command={:04x} payloadBytes={} queued={}",
+          *round, mask, request.request, application.size(), m_wii_ds_bridge_rounds.Size()));
   }
   std::vector<u8> multiplayer_packet;
   if (round)
@@ -1039,8 +1184,15 @@ void NetWDCommandDevice::SendBridgeFrame(const IOCtlVRequest& request)
     if (peer.port == 0 || !peer.client.associated)
       continue;
     const auto& outgoing = peer.multiplayer && round ? multiplayer_packet : *packet;
-    status = m_wii_ds_bridge_socket.send(outgoing.data(), outgoing.size(),
-                                         sf::IpAddress::LocalHost, peer.port);
+    status = m_wii_ds_bridge_socket.send(outgoing.data(), outgoing.size(), sf::IpAddress::LocalHost,
+                                         peer.port);
+    if (m_wii_ds_bridge_diagnostics &&
+        (status != sf::Socket::Status::Done || DiagnosticSample(m_wii_ds_diagnostic_tx_frames + 1)))
+      WriteBridgeDiagnostic(fmt::format(
+          "event=WD_TX_PEER n={} command={:04x} port={} aid={} generation={} round={} bytes={} "
+          "transportStatus={}",
+          m_wii_ds_diagnostic_tx_frames + 1, request.request, peer.port, peer.client.aid,
+          peer.generation, round.value_or(0), outgoing.size(), static_cast<int>(status)));
   }
   if (DiagnosticSample(++m_wii_ds_diagnostic_tx_frames))
     WriteBridgeDiagnostic(
@@ -1076,11 +1228,11 @@ void NetWDCommandDevice::SendBridgeFrame(const IOCtlVRequest& request)
   }
 }
 
-sf::Socket::Status NetWDCommandDevice::SendBridgeBeaconToPeer(
-    const WD::WiiDSBridgePeer& peer, std::size_t* packet_size)
+sf::Socket::Status NetWDCommandDevice::SendBridgeBeaconToPeer(const WD::WiiDSBridgePeer& peer,
+                                                              std::size_t* packet_size)
 {
-  const auto packet = WD::BuildWiiDSBridgeBeaconPacket(
-      m_info.mac, m_wii_ds_bridge_beacon, peer.parent_identity);
+  const auto packet =
+      WD::BuildWiiDSBridgeBeaconPacket(m_info.mac, m_wii_ds_bridge_beacon, peer.parent_identity);
   if (!packet)
   {
     if (packet_size)
@@ -1090,7 +1242,7 @@ sf::Socket::Status NetWDCommandDevice::SendBridgeBeaconToPeer(
   if (packet_size)
     *packet_size = packet->size();
   return m_wii_ds_bridge_socket.send(packet->data(), packet->size(), sf::IpAddress::LocalHost,
-                                      peer.port);
+                                     peer.port);
 }
 
 void NetWDCommandDevice::SendBridgeBeacon(const IOCtlVRequest& request)
@@ -1112,6 +1264,12 @@ void NetWDCommandDevice::SendBridgeBeacon(const IOCtlVRequest& request)
   memory.CopyFromEmu(beacon.data(), timestamp_vector->address, 2);
   memory.CopyFromEmu(beacon.data() + 2, data_vector->address, 128);
 
+  // Report every actual advertisement transition, not each identical SDK refresh.
+  // The comparison is diagnostic-only and never changes the advertised payload.
+  const bool diagnostic_beacon_changed =
+      m_wii_ds_bridge_diagnostics &&
+      (m_wii_ds_bridge_beacon.size() != beacon.size() ||
+       !std::equal(beacon.begin(), beacon.end(), m_wii_ds_bridge_beacon.begin()));
   m_wii_ds_bridge_beacon.assign(beacon.begin(), beacon.end());
   auto status = sf::Socket::Status::NotReady;
   if (m_wii_ds_bridge_socket.getLocalPort() != 0)
@@ -1122,11 +1280,11 @@ void NetWDCommandDevice::SendBridgeBeacon(const IOCtlVRequest& request)
         status = SendBridgeBeaconToPeer(peer);
     }
   }
-  if (DiagnosticSample(++m_wii_ds_diagnostic_beacons))
+  if (DiagnosticSample(++m_wii_ds_diagnostic_beacons) || diagnostic_beacon_changed)
     WriteBridgeDiagnostic(
-        fmt::format("event=BEACON_CONFIG n={} gameId={:02x}{:02x}{:02x}{:02x} status={}",
+        fmt::format("event=BEACON_CONFIG n={} gameId={:02x}{:02x}{:02x}{:02x} status={} changed={}",
                     m_wii_ds_diagnostic_beacons, beacon[6], beacon[7], beacon[8], beacon[9],
-                    static_cast<int>(status)));
+                    static_cast<int>(status), diagnostic_beacon_changed));
   if (m_wii_ds_bridge_diagnostics)
     INFO_LOG_FMT(
         IOS_NET,
@@ -1136,6 +1294,23 @@ void NetWDCommandDevice::SendBridgeBeacon(const IOCtlVRequest& request)
 
 std::optional<IPCReply> NetWDCommandDevice::IOCtlV(const IOCtlVRequest& request)
 {
+  u64 diagnostic_ioctl_count = 0;
+  if (m_wii_ds_bridge_enabled && m_wii_ds_bridge_diagnostics)
+  {
+    const std::size_t index = ((request.request & 0x8000) ? 16 : 0) | (request.request & 0xf);
+    diagnostic_ioctl_count = ++m_wii_ds_diagnostic_ioctl_counts[index];
+    if (DiagnosticSample(diagnostic_ioctl_count))
+    {
+      const auto* first = request.GetVector(0);
+      const auto* second = request.GetVector(1);
+      WriteBridgeDiagnostic(fmt::format(
+          "event=WD_IOCTL command={:04x} n={} inputs={} outputs={} vector0Bytes={} vector1Bytes={} "
+          "mode={} status={} target={}",
+          request.request, diagnostic_ioctl_count, request.in_vectors.size(),
+          request.io_vectors.size(), first ? first->size : 0, second ? second->size : 0,
+          static_cast<u32>(m_mode), static_cast<u32>(m_status), static_cast<u32>(m_target_status)));
+    }
+  }
   switch (request.request)
   {
   case IOCTLV_WD_INVALID:
@@ -1219,6 +1394,10 @@ std::optional<IPCReply> NetWDCommandDevice::IOCtlV(const IOCtlVRequest& request)
   case IOCTLV_WD_CHANGE_GAMEINFO:
   case IOCTLV_WD_CHANGE_VTSF:
   default:
+    if (m_wii_ds_bridge_diagnostics && DiagnosticSample(diagnostic_ioctl_count))
+      WriteBridgeDiagnostic(fmt::format(
+          "event=WD_UNHANDLED command={:04x} n={} inputs={} outputs={}", request.request,
+          diagnostic_ioctl_count, request.in_vectors.size(), request.io_vectors.size()));
     DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::UsesWDUnimplementedIOCtl);
     request.Dump(GetSystem(), GetDeviceName(), Common::Log::LogType::IOS_NET,
                  Common::Log::LogLevel::LWARNING);

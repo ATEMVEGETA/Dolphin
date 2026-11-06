@@ -169,7 +169,7 @@ private:
   IPCReply GetInfo(const IOCtlVRequest& request) const;
   void SendBridgeBeacon(const IOCtlVRequest& request);
   sf::Socket::Status SendBridgeBeaconToPeer(const WD::WiiDSBridgePeer& peer,
-                                          std::size_t* packet_size = nullptr);
+                                            std::size_t* packet_size = nullptr);
   void SendBridgeFrame(const IOCtlVRequest& request);
   void ClearBridgePeer();
   void RemoveBridgePeer(unsigned short port, u16 reason, bool notify);
@@ -206,6 +206,12 @@ private:
   u64 m_wii_ds_diagnostic_notifications = 0;
   u64 m_wii_ds_diagnostic_beacons = 0;
   u64 m_wii_ds_diagnostic_upgrade_required = 0;
+  // Host-only tracing counters: never serialized or used by the radio protocol.
+  u64 m_wii_ds_diagnostic_session = 0;
+  mutable u64 m_wii_ds_diagnostic_records = 0;
+  mutable bool m_wii_ds_diagnostic_full = false;
+  std::array<u64, 32> m_wii_ds_diagnostic_ioctl_counts{};
+  u64 m_wii_ds_diagnostic_rejects = 0;
   // Canonical native beacon body (timestamp 2 + Nintendo game info 128), not
   // a wire packet. Fresh and replayed advertisements share one encoder.
   std::vector<u8> m_wii_ds_bridge_beacon;
