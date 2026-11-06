@@ -38,14 +38,15 @@ melonDS 1.1.
 
 ### Experimental macOS downloads
 
-Native **Apple Silicon (arm64)** and **Intel (x86_64)** builds with the beta.3
-identity fix are available in the [macOS tester prerelease](https://github.com/ATEMVEGETA/Dolphin/releases/tag/wii-ds-link-v0.2.0-beta.3-macos.1).
-These earlier Mac packages do not yet include the beta.4 Driver changes.
+Native **Apple Silicon (arm64)** and **Intel (x86_64)** builds with the beta.4
+Driver changes are available in the [macOS tester prerelease](https://github.com/ATEMVEGETA/Dolphin/releases/tag/wii-ds-link-v0.2.0-beta.4-macos.1).
 Both require **macOS 15 or newer**, overriding the generic upstream minimum
 listed below. Use the matching melonDS from the
-[combined macOS package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.2.0-beta.3-macos.1).
+[combined macOS package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.2.0-beta.4-macos.1).
 Compilation, native startup and automated link checks passed; actual Mac
-gameplay and transfers are **not yet verified**. These apps are ad-hoc signed,
+gameplay and transfers are **not yet verified**. Both architectures passed
+13 transport, 6 multiclient, 8 identity and 8 native-beacon test groups.
+These apps are ad-hoc signed,
 not Developer-ID signed or notarized. This candidate uses Metal/OpenGL;
 Vulkan, built-in FFmpeg dumping and auto-update are disabled. See the
 [Mac testing guide](https://github.com/ATEMVEGETA/Wii-DS-Link/blob/main/MACOS-TESTING.md)

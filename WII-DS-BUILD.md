@@ -45,5 +45,7 @@ Mystery Gift receipt/repeat with Pearl and a non-default parent was confirmed
 on beta.3. Production identity/beacon, multiplayer/helper, patch-allowlist and
 startup/dependency checks passed. Prior Ranch and four-player Battle Revolution
 retail results remain historical beta.1 coverage; those complete flows were
-not rerun for beta.4. The separate beta.3-macos.1 tester packages do not include
-these Driver changes and are not Mac gameplay certification.
+not rerun for beta.4. The separate beta.4-macos.1 tester packages include these
+Driver changes and passed native automated checks, but are not Mac gameplay
+certification. Their build records identify the exact source pins independently
+of later documentation-only commits.
