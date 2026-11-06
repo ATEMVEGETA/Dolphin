@@ -7,33 +7,40 @@
 > Downloads, setup instructions, compatibility notes, and matching version
 > links are maintained at [Wii-DS-Link](https://github.com/ATEMVEGETA/Wii-DS-Link).
 > It has been tested so far with **My Pokémon Ranch** and
-> **Pokémon Battle Revolution**, including four DS players in DS Battle Mode.
+> **Pokémon Battle Revolution**, including four DS players in DS Battle Mode,
+> and **Driver: San Francisco (PAL)** Download Play connectivity.
 > This work is not affiliated with or endorsed by the upstream Dolphin project.
 
 ## Wii–DS Link download
 
-**[Download Dolphin 2609a Wii–DS Link for Windows x64](https://github.com/ATEMVEGETA/dolphin/releases/download/wii-ds-link-v0.2.0-beta.3/Dolphin-2609a-WiiDS-Link-Windows-x64-v0.2.0-beta.3.zip)**
+**[Download Dolphin 2609a Wii–DS Link for Windows x64](https://github.com/ATEMVEGETA/dolphin/releases/download/wii-ds-link-v0.2.0-beta.4/Dolphin-2609a-WiiDS-Link-Windows-x64-v0.2.0-beta.4.zip)**
 
-See the [v0.2.0-beta.3 release page](https://github.com/ATEMVEGETA/dolphin/releases/tag/wii-ds-link-v0.2.0-beta.3)
+See the [v0.2.0-beta.4 release page](https://github.com/ATEMVEGETA/dolphin/releases/tag/wii-ds-link-v0.2.0-beta.4)
 for its SHA-256 checksum and source snapshot links. The
-[combined package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.2.0-beta.3)
+[combined package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.2.0-beta.4)
 also includes the matching melonDS build.
 
-This update fixes Battle Revolution Mystery Gift receipt by keeping WD, NCD
-and the virtual radio on Dolphin's normal configured identity. No manual MAC
-change is needed. **Update both emulators to v0.2.0-beta.3.** The tester
-confirmed receipt and a repeated successful attempt with this exact pair.
+This update includes the upstream [Driver frame-rate speed-hack removal](https://github.com/dolphin-emu/dolphin/pull/14983)
+for USA and PAL, including the obsolete patch approvals. The matching melonDS
+fixes a generic post-Download-Play Nintendo beacon-length mismatch; Driver:
+San Francisco (PAL) connectivity was confirmed by the tester. **Update both
+emulators to v0.2.0-beta.4**, including Dolphin's supplied runtime files.
+Optional transport diagnostics are off by default and bounded; the matching
+melonDS logger is buffered to avoid per-record disk stalls.
 
 Multi-DS support is retained: 15 client slots, subject to each game's limit;
 eight-client automated checks passed with a non-default parent address.
 Four-player Battle Revolution and Ranch retail results are from beta.1, not
-freshly retested for this update. The source bases remain Dolphin 2609a and
+freshly retested for this update. The beta.3 Mystery Gift identity fix is
+retained; gift receipt and a repeated attempt were confirmed on beta.3.
+The source bases remain Dolphin 2609a and
 melonDS 1.1.
 
 ### Experimental macOS downloads
 
 Native **Apple Silicon (arm64)** and **Intel (x86_64)** builds with the beta.3
-fix are available in the [macOS tester prerelease](https://github.com/ATEMVEGETA/Dolphin/releases/tag/wii-ds-link-v0.2.0-beta.3-macos.1).
+identity fix are available in the [macOS tester prerelease](https://github.com/ATEMVEGETA/Dolphin/releases/tag/wii-ds-link-v0.2.0-beta.3-macos.1).
+These earlier Mac packages do not yet include the beta.4 Driver changes.
 Both require **macOS 15 or newer**, overriding the generic upstream minimum
 listed below. Use the matching melonDS from the
 [combined macOS package](https://github.com/ATEMVEGETA/Wii-DS-Link/releases/tag/v0.2.0-beta.3-macos.1).

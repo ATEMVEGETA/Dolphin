@@ -1,7 +1,7 @@
-# Wii-DS Link Windows build, v0.2.0-beta.3
+# Wii-DS Link Windows build, v0.2.0-beta.4
 
 Upstream base: Dolphin 2609a, 409881c34357d0f105fd473167d15ab0bd9c1628.
-Source tag: `wii-ds-link-v0.2.0-beta.3`. Restore pinned submodules:
+Source tag: `wii-ds-link-v0.2.0-beta.4`. Restore pinned submodules:
 
 ```sh
 git submodule update --init --recursive
@@ -22,11 +22,11 @@ Distribute Dolphin.exe with the matching Qt DLLs/plugins, qt.conf, Data/Sys,
 portable.txt and upstream/dependency notices. Never include a configured User
 directory, games, dumped firmware/NAND, saves or diagnostics.
 
-The exact retail-tested EXE is preserved. It was built from fork base
-22060863a04f086bd0c51a6fdf7500e27470d35d plus this tag's functional changes,
-before final publication documentation. Embedded older Git/test labels do not
-identify a different payload; use the release build record and EXE SHA256:
-39d004a14c0a82bb472fdd3a0af01da1600b1b41a7d6efd005f96cf46d466fb8.
+The public EXE is rebuilt with release branding from the same functional code
+as the candidate on which the tester confirmed Driver: San Francisco (PAL)
+connectivity. RELEASE-BUILD.json records exact source revisions and EXE hashes;
+SHA256SUMS.txt records archive hashes. Automated runtime checks apply to the
+publication build; a metadata-only rebuild is not a separate retail test.
 Rebuilds need not be bit-for-bit identical. No Playnite customization is included.
 
 The fix keeps WD and NCD on the normal configured identity and atomically
@@ -34,9 +34,16 @@ advertises it to P1 companions. Both emulators must be updated. Older clients
 that cannot represent a different parent identity are refused, not silently
 treated as compatible. No saved WirelessMac rewrite is needed.
 
-Mystery Gift receipt with Pearl and a non-default parent was confirmed on
-this exact pair and repeated successfully. Seventeen production identity/
-beacon tests, multiplayer/helper tests and private startup/dependency checks
-passed. Prior Ranch and four-player Battle Revolution retail results remain
-historical beta.1 coverage; those complete flows were not rerun for this fix.
-macOS binaries containing this fix are not published yet.
+Beta.4 backports upstream commit
+`f4b9fae9f53db163a36b39fde1837421016d6a5f` (PR #14983), removing Driver's USA
+and PAL frame-rate speed-hack GameINIs and the corresponding obsolete approvals.
+Verify their absence from packaged Sys data, not only the source checkout.
+The matching melonDS corrects a generic post-Download-Play GameInfo-length
+mismatch. No title-specific wireless workaround or shutdown change is included.
+
+Mystery Gift receipt/repeat with Pearl and a non-default parent was confirmed
+on beta.3. Production identity/beacon, multiplayer/helper, patch-allowlist and
+startup/dependency checks passed. Prior Ranch and four-player Battle Revolution
+retail results remain historical beta.1 coverage; those complete flows were
+not rerun for beta.4. The separate beta.3-macos.1 tester packages do not include
+these Driver changes and are not Mac gameplay certification.

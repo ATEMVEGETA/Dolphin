@@ -81,6 +81,18 @@ separate processes; eight-player retail gameplay has not been established.
 These results do not certify every game or ROM/save combination. Games can impose their own cartridge/save
 identity rules independently of transport compatibility.
 
+Beta.3 added a confirmed Battle Revolution Mystery Gift receipt/repeat result
+with the normal non-default parent identity. Beta.4 adds Driver: San Francisco
+(PAL) Download Play connectivity with the matching melonDS GameInfo-length
+encoder correction. The complete earlier Pokémon retail flows were not
+freshly rerun for beta.4. Automated lifecycle, identity and eight-client
+transport checks are protocol regressions, not new retail gameplay claims.
+
+Beta.4 also backports upstream Dolphin PR #14983, removing the obsolete Driver
+USA/PAL frame-rate speed-hack GameINIs and their patch approvals. This is
+separate from the DS reconnection fix. No title-specific wireless workaround
+or change to graceful shutdown is included.
+
 No games, BIOS, firmware, NAND or save data belong in a distributable package.
 Build downstream packages with a unique distributor identifier and with
 `DOLPHIN_DEFAULT_UPDATE_TRACK` empty so official automatic updates cannot
