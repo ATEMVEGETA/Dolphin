@@ -25,6 +25,7 @@
 #include "Core/IOS/Network/WD/WiiDSBridgeIdentity.h"
 #include "Core/IOS/Network/WD/WiiDSBridgeMPConfig.h"
 #include "Core/IOS/Network/WD/WiiDSBridgeSettings.h"
+#include "Core/IOS/Network/WD/WiiDSLanConfig.h"
 #include "Core/System.h"
 
 namespace IOS::HLE
@@ -108,6 +109,18 @@ NetWDCommandDevice::NetWDCommandDevice(EmulationKernel& ios, const std::string& 
   m_wii_ds_bridge_socket.setBlocking(false);
   const auto settings = WD::LoadWiiDSBridgeSettings();
   m_wii_ds_bridge_enabled = settings.enabled;
+  const auto transport = WiiDSLan::Parse(settings.peer_ipv4.c_str());
+  if (!transport.valid)
+  {
+    m_wii_ds_bridge_enabled = false;
+    ERROR_LOG_FMT(IOS_NET, "Invalid Wii-DS peer IPv4 address; Wii-DS bridge disabled");
+  }
+  else
+  {
+    const auto& ip = transport.peer;
+    m_wii_ds_bridge_peer_address = sf::IpAddress(ip[0], ip[1], ip[2], ip[3]);
+    m_wii_ds_bridge_bind_address = transport.IsLocal() ? sf::IpAddress::LocalHost : sf::IpAddress::Any;
+  }
   m_wii_ds_bridge_diagnostics = settings.diagnostics;
   // These are part of the native backend, not optional protocol variants.
   m_wii_ds_native_disconnect_enabled = true;
@@ -116,7 +129,7 @@ NetWDCommandDevice::NetWDCommandDevice(EmulationKernel& ios, const std::string& 
   {
     // WD and NCD must report the same configured radio identity. P1
     // companions learn it with the beacon; never rewrite the user's MAC.
-    const auto status = m_wii_ds_bridge_socket.bind(sf::Socket::AnyPort, sf::IpAddress::LocalHost);
+    const auto status = m_wii_ds_bridge_socket.bind(sf::Socket::AnyPort, m_wii_ds_bridge_bind_address);
     m_wii_ds_bridge_last_bind = std::chrono::steady_clock::now();
     WriteBridgeDiagnostic(fmt::format("event=DEVICE_READY bindStatus={} port={}",
                                       static_cast<int>(status),
@@ -183,7 +196,7 @@ void NetWDCommandDevice::Update()
         return;
       m_wii_ds_bridge_last_bind = now;
       const auto status =
-          m_wii_ds_bridge_socket.bind(sf::Socket::AnyPort, sf::IpAddress::LocalHost);
+          m_wii_ds_bridge_socket.bind(sf::Socket::AnyPort, m_wii_ds_bridge_bind_address);
       WriteBridgeDiagnostic(fmt::format("event=BIND_RETRY status={} port={}",
                                         static_cast<int>(status),
                                         m_wii_ds_bridge_socket.getLocalPort()));
@@ -197,7 +210,7 @@ void NetWDCommandDevice::Update()
       for (unsigned short port = WD::WiiDSBridgeFirstPort; port <= WD::WiiDSBridgeLastPort; ++port)
       {
         status = m_wii_ds_bridge_socket.send(WiiDSBridgeHello.data(), WiiDSBridgeHello.size(),
-                                             sf::IpAddress::LocalHost, port);
+                                             m_wii_ds_bridge_peer_address, port);
       }
       if (DiagnosticSample(++m_wii_ds_diagnostic_hellos))
         WriteBridgeDiagnostic(fmt::format("event=HELLO n={} status={}", m_wii_ds_diagnostic_hellos,
@@ -229,7 +242,7 @@ void NetWDCommandDevice::Update()
       if (m_wii_ds_bridge_socket.receive(reply.data(), reply.size(), received, sender,
                                          sender_port) != sf::Socket::Status::Done)
         break;
-      if (sender != sf::IpAddress::LocalHost || sender_port < WD::WiiDSBridgeFirstPort ||
+      if (sender != m_wii_ds_bridge_peer_address || sender_port < WD::WiiDSBridgeFirstPort ||
           sender_port > WD::WiiDSBridgeLastPort)
         continue;
       const std::string_view message(reply.data(), received);
@@ -580,7 +593,7 @@ void NetWDCommandDevice::ProcessBridgeRounds()
       if (recipient.port != 0 && peer && peer->generation == recipient.generation)
       {
         const auto status = m_wii_ds_bridge_socket.send(ack.data(), ack.size(),
-                                                        sf::IpAddress::LocalHost, recipient.port);
+                                                        m_wii_ds_bridge_peer_address, recipient.port);
         if (m_wii_ds_bridge_diagnostics && (status != sf::Socket::Status::Done ||
                                             failure_mask != 0 || DiagnosticSample(round->id)))
           WriteBridgeDiagnostic(fmt::format("event=ROUND_ACK_TX port={} round={} generation={} "
@@ -624,7 +637,7 @@ void NetWDCommandDevice::StopBridgeSession()
       if (peer.port != 0)
       {
         const auto status = m_wii_ds_bridge_socket.send(stop.data(), stop.size(),
-                                                        sf::IpAddress::LocalHost, peer.port);
+                                                        m_wii_ds_bridge_peer_address, peer.port);
         if (m_wii_ds_bridge_diagnostics)
           WriteBridgeDiagnostic(
               fmt::format("event=SESSION_STOP_TX port={} generation={} aid={} transportStatus={}",
@@ -700,7 +713,7 @@ void NetWDCommandDevice::SendBridgeManagementResponse(const u8* request_frame,
               response + IEEE80211HeaderSize);
 
   const auto status =
-      m_wii_ds_bridge_socket.send(packet.data(), packet.size(), sf::IpAddress::LocalHost, port);
+      m_wii_ds_bridge_socket.send(packet.data(), packet.size(), m_wii_ds_bridge_peer_address, port);
   WriteBridgeDiagnostic(fmt::format("event=MANAGEMENT_RESPONSE subtype={:02x} channel={} status={} "
                                     "port={} aid={} associationStatus={} sequence={}",
                                     response_subtype, channel, static_cast<int>(status), port, aid,
@@ -1068,7 +1081,7 @@ IPCReply NetWDCommandDevice::Disassociate(const IOCtlVRequest& request)
       std::copy(m_info.mac.begin(), m_info.mac.end(), frame + 10);
       std::copy(m_info.mac.begin(), m_info.mac.end(), frame + 16);
       frame[24] = 3;
-      (void)m_wii_ds_bridge_socket.send(packet.data(), packet.size(), sf::IpAddress::LocalHost,
+      (void)m_wii_ds_bridge_socket.send(packet.data(), packet.size(), m_wii_ds_bridge_peer_address,
                                         peer.port);
       m_wii_ds_bridge_rounds.RemovePeer(peer.port, peer.generation);
       QueueBridgeDisconnect(peer.client, 3);
@@ -1184,7 +1197,7 @@ void NetWDCommandDevice::SendBridgeFrame(const IOCtlVRequest& request)
     if (peer.port == 0 || !peer.client.associated)
       continue;
     const auto& outgoing = peer.multiplayer && round ? multiplayer_packet : *packet;
-    status = m_wii_ds_bridge_socket.send(outgoing.data(), outgoing.size(), sf::IpAddress::LocalHost,
+    status = m_wii_ds_bridge_socket.send(outgoing.data(), outgoing.size(), m_wii_ds_bridge_peer_address,
                                          peer.port);
     if (m_wii_ds_bridge_diagnostics &&
         (status != sf::Socket::Status::Done || DiagnosticSample(m_wii_ds_diagnostic_tx_frames + 1)))
@@ -1241,7 +1254,7 @@ sf::Socket::Status NetWDCommandDevice::SendBridgeBeaconToPeer(const WD::WiiDSBri
   }
   if (packet_size)
     *packet_size = packet->size();
-  return m_wii_ds_bridge_socket.send(packet->data(), packet->size(), sf::IpAddress::LocalHost,
+  return m_wii_ds_bridge_socket.send(packet->data(), packet->size(), m_wii_ds_bridge_peer_address,
                                      peer.port);
 }
 
