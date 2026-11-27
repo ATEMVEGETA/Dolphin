@@ -15,6 +15,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QSpacerItem>
 
@@ -27,6 +28,7 @@
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/IOS/Network/WD/WiiDSBridgeSettings.h"
+#include "Core/IOS/Network/WD/WiiDSLanConfig.h"
 #include "Core/System.h"
 #include "Core/USBUtils.h"
 
@@ -92,12 +94,14 @@ void WiiPane::CreateLayout()
 
 void WiiPane::ConnectLayout()
 {
-  const auto save_wii_ds = [this] {
-    IOS::HLE::WD::SaveWiiDSBridgeSettings(
-        {m_wii_ds_bridge_checkbox->isChecked(), m_wii_ds_diagnostics_checkbox->isChecked()});
-  };
-  connect(m_wii_ds_bridge_checkbox, &QCheckBox::toggled, this, save_wii_ds);
-  connect(m_wii_ds_diagnostics_checkbox, &QCheckBox::toggled, this, save_wii_ds);
+  connect(m_wii_ds_bridge_checkbox, &QCheckBox::toggled, this, &WiiPane::SaveWiiDSSettings);
+  connect(m_wii_ds_diagnostics_checkbox, &QCheckBox::toggled, this, &WiiPane::SaveWiiDSSettings);
+  connect(m_wii_ds_peer_address, &QLineEdit::editingFinished, this, &WiiPane::SaveWiiDSSettings);
+  connect(m_wii_ds_peer_address, &QLineEdit::textEdited, this, [this] {
+    const bool valid = WiiDSLan::Parse(m_wii_ds_peer_address->text().trimmed().toStdString().c_str()).valid;
+    m_wii_ds_peer_error->setText(tr("Enter a valid IPv4 address. The previous address remains saved."));
+    m_wii_ds_peer_error->setVisible(!valid);
+  });
 
   // Whitelisted USB Passthrough Devices
   connect(&Settings::Instance(), &Settings::ConfigChanged, this,
@@ -112,6 +116,21 @@ void WiiPane::ConnectLayout()
   connect(&Settings::Instance(), &Settings::EmulationStateChanged, this, [this](Core::State state) {
     OnEmulationStateChanged(state != Core::State::Uninitialized);
   });
+}
+
+void WiiPane::SaveWiiDSSettings()
+{
+  const auto peer = m_wii_ds_peer_address->text().trimmed().toStdString();
+  const bool valid = WiiDSLan::Parse(peer.c_str()).valid;
+  auto settings = IOS::HLE::WD::LoadWiiDSBridgeSettings();
+  settings.enabled = m_wii_ds_bridge_checkbox->isChecked();
+  settings.diagnostics = m_wii_ds_diagnostics_checkbox->isChecked();
+  if (valid)
+    settings.peer_ipv4 = peer;
+  const bool saved = IOS::HLE::WD::SaveWiiDSBridgeSettings(settings);
+  m_wii_ds_peer_error->setText(saved ? tr("Enter a valid IPv4 address. The previous address remains saved.") :
+                                      tr("Could not save Wii-DS settings."));
+  m_wii_ds_peer_error->setVisible(!saved || !valid);
 }
 
 void WiiPane::CreateMisc()
@@ -129,8 +148,8 @@ void WiiPane::CreateMisc()
   m_wii_ds_bridge_checkbox = new QCheckBox(tr("Connect to melonDS"));
   m_wii_ds_diagnostics_checkbox = new QCheckBox(tr("Wii-DS diagnostic logging"));
   m_wii_ds_bridge_checkbox->setToolTip(
-      tr("Enables a local Wii-DS link with one compatible melonDS instance on this PC.\n"
-         "Enable Connect to Dolphin in melonDS as well. No Wi-Fi adapter is needed.\n"
+      tr("Enables a Wii-DS link with a compatible melonDS device.\n"
+         "Enter the phone or PC address below, and enable Connect to Dolphin in melonDS.\n"
          "Applies to the next game launch. The emulators can be opened in either order;\n"
          "start the connection from each game's own menu."));
   m_wii_ds_diagnostics_checkbox->setToolTip(
@@ -139,6 +158,17 @@ void WiiPane::CreateMisc()
   const auto wii_ds = IOS::HLE::WD::LoadWiiDSBridgeSettings();
   m_wii_ds_bridge_checkbox->setChecked(wii_ds.enabled);
   m_wii_ds_diagnostics_checkbox->setChecked(wii_ds.diagnostics);
+  m_wii_ds_peer_address = new QLineEdit(QString::fromStdString(wii_ds.peer_ipv4));
+  m_wii_ds_peer_address->setObjectName(QStringLiteral("wiiDsPeerIPv4"));
+  m_wii_ds_peer_address->setMaxLength(64);
+  m_wii_ds_peer_address->setPlaceholderText(tr("192.168.1.xxx"));
+  m_wii_ds_peer_address->setToolTip(
+      tr("IPv4 address of the phone or PC running melonDS. Leave empty for same-PC connections.\n"
+         "Saved automatically when you leave the field. Applies to the next game launch."));
+  m_wii_ds_peer_error = new QLabel;
+  m_wii_ds_peer_error->setWordWrap(true);
+  m_wii_ds_peer_error->setStyleSheet(QStringLiteral("color: #c33;"));
+  m_wii_ds_peer_error->hide();
 
   m_aspect_ratio_choice_label = new QLabel(tr("Aspect Ratio:"));
   m_aspect_ratio_choice = new ConfigChoiceMap<bool>({{tr("4:3"), false}, {tr("16:9"), true}},
@@ -183,7 +213,10 @@ void WiiPane::CreateMisc()
   misc_settings_group_layout->addWidget(m_sound_mode_choice_label, 4, 0, 1, 1);
   misc_settings_group_layout->addWidget(m_sound_mode_choice, 4, 1, 1, 1);
   misc_settings_group_layout->addWidget(m_wii_ds_bridge_checkbox, 5, 0, 1, 2);
-  misc_settings_group_layout->addWidget(m_wii_ds_diagnostics_checkbox, 6, 0, 1, 2);
+  misc_settings_group_layout->addWidget(new QLabel(tr("melonDS device IPv4 address:")), 6, 0);
+  misc_settings_group_layout->addWidget(m_wii_ds_peer_address, 6, 1);
+  misc_settings_group_layout->addWidget(m_wii_ds_peer_error, 7, 0, 1, 2);
+  misc_settings_group_layout->addWidget(m_wii_ds_diagnostics_checkbox, 8, 0, 1, 2);
 }
 
 void WiiPane::CreateSDCard()
@@ -370,6 +403,7 @@ void WiiPane::OnEmulationStateChanged(bool running)
   m_wiilink_checkbox->setEnabled(!running);
   m_wii_ds_bridge_checkbox->setEnabled(!running);
   m_wii_ds_diagnostics_checkbox->setEnabled(!running);
+  m_wii_ds_peer_address->setEnabled(!running);
 }
 
 void WiiPane::ValidateSelectionState()

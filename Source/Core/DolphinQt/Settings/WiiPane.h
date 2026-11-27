@@ -16,6 +16,7 @@ class ConfigUserPath;
 class QCheckBox;
 class QLabel;
 class QListWidget;
+class QLineEdit;
 class QPushButton;
 class QString;
 class QVBoxLayout;
@@ -30,6 +31,7 @@ private:
   void PopulateUSBPassthroughListWidget();
   void CreateLayout();
   void ConnectLayout();
+  void SaveWiiDSSettings();
   void CreateMisc();
   void CreateSDCard();
   void CreateWhitelistedUSBPassthroughDevices();
@@ -55,6 +57,8 @@ private:
   ConfigBool* m_wiilink_checkbox;
   QCheckBox* m_wii_ds_bridge_checkbox;
   QCheckBox* m_wii_ds_diagnostics_checkbox;
+  QLineEdit* m_wii_ds_peer_address;
+  QLabel* m_wii_ds_peer_error;
   ConfigChoiceU32* m_system_language_choice;
   QLabel* m_system_language_choice_label;
   ConfigChoiceMap<bool>* m_aspect_ratio_choice;

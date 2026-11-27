@@ -197,6 +197,8 @@ private:
   std::deque<u32> m_recv_notification_requests;
   std::deque<std::array<u8, 0x94>> m_wii_ds_bridge_notifications;
   sf::UdpSocket m_wii_ds_bridge_socket;
+  sf::IpAddress m_wii_ds_bridge_peer_address = sf::IpAddress::LocalHost;
+  sf::IpAddress m_wii_ds_bridge_bind_address = sf::IpAddress::LocalHost;
   bool m_wii_ds_bridge_enabled = false;
   bool m_wii_ds_bridge_diagnostics = false;
   u64 m_wii_ds_diagnostic_hellos = 0;
